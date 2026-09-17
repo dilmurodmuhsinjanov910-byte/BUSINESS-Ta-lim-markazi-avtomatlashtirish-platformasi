@@ -265,6 +265,21 @@ export class LeadsService {
       },
     });
 
+    // Record system audit log
+    if (this.prisma.auditLog?.create) {
+      await this.prisma.auditLog.create({
+        data: {
+          entityType: 'Lead',
+          entityId: id,
+          action: 'STATUS_CHANGE',
+          changedById: userId,
+          oldValue: JSON.stringify({ status: lead.status }),
+          newValue: JSON.stringify({ status: newStatus, lostReason }),
+          reason: newStatus === LeadStatus.LOST ? `Yo'qotish sababi: ${lostReason}` : `Status o'zgartirildi: ${lead.status} -> ${newStatus}`,
+        },
+      }).catch(() => {});
+    }
+
     return updated;
   }
 

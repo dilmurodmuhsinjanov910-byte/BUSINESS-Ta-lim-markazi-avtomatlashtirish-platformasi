@@ -84,17 +84,43 @@ export class KnowledgeBaseService {
   // Soft delete / archive
   async archive(id: string) {
     await this.findOne(id);
-    return this.prisma.knowledgeBaseArticle.update({
+    const updated = await this.prisma.knowledgeBaseArticle.update({
       where: { id },
       data: { status: ArticleStatus.ARCHIVED },
     });
+
+    if (this.prisma.auditLog?.create) {
+      await this.prisma.auditLog.create({
+        data: {
+          entityType: 'KnowledgeBase',
+          entityId: id,
+          action: 'ARCHIVE',
+          reason: 'Maqola arxivlandi va AI bazasidan chiqarildi',
+        },
+      }).catch(() => {});
+    }
+
+    return updated;
   }
 
   async publish(id: string) {
     await this.findOne(id);
-    return this.prisma.knowledgeBaseArticle.update({
+    const updated = await this.prisma.knowledgeBaseArticle.update({
       where: { id },
       data: { status: ArticleStatus.PUBLISHED },
     });
+
+    if (this.prisma.auditLog?.create) {
+      await this.prisma.auditLog.create({
+        data: {
+          entityType: 'KnowledgeBase',
+          entityId: id,
+          action: 'PUBLISH',
+          reason: 'Maqola nashr qilindi va AI bazasiga kiritildi',
+        },
+      }).catch(() => {});
+    }
+
+    return updated;
   }
 }
