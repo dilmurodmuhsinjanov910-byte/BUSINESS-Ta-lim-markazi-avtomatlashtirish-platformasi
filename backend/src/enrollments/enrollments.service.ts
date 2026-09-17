@@ -1,0 +1,373 @@
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
+import { TelegramService } from '../telegram/telegram.service';
+import { CreateEnrollmentDto } from './dto/create-enrollment.dto';
+import { EnrollmentStatus } from '@prisma/client';
+
+@Injectable()
+export class EnrollmentsService {
+  private readonly logger = new Logger(EnrollmentsService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private telegramService: TelegramService,
+    private configService: ConfigService,
+  ) {}
+
+  async createEnrollment(dto: CreateEnrollmentDto, createdById?: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: dto.leadId },
+    });
+    if (!lead) {
+      throw new NotFoundException(`Lid topilmadi (ID: ${dto.leadId})`);
+    }
+
+    const group = await this.prisma.group.findUnique({
+      where: { id: dto.groupId },
+      include: {
+        course: true,
+        branch: true,
+      },
+    });
+    if (!group) {
+      throw new NotFoundException(`Guruh topilmadi (ID: ${dto.groupId})`);
+    }
+
+    // Check group capacity
+    if (group.currentStudents >= group.maxStudents) {
+      throw new BadRequestException(
+        `Guruh to'lgan. Maksimal o'quvchilar soni: ${group.maxStudents}, hozirda: ${group.currentStudents}`,
+      );
+    }
+
+    // Check existing active enrollment
+    const existing = await this.prisma.enrollment.findFirst({
+      where: {
+        leadId: dto.leadId,
+        groupId: dto.groupId,
+        status: EnrollmentStatus.ACTIVE,
+      },
+    });
+    if (existing) {
+      throw new BadRequestException("Ushbu o'quvchi bu guruhga allaqachon biriktirilgan");
+    }
+
+    const monthlyFee = dto.monthlyFee ?? group.course.monthlyPrice;
+
+    // Database transaction: create enrollment, increment currentStudents, mark lead WON, create activity
+    const enrollment = await this.prisma.$transaction(async (tx) => {
+      const newEnrollment = await tx.enrollment.create({
+        data: {
+          leadId: dto.leadId,
+          groupId: dto.groupId,
+          monthlyFee,
+          status: EnrollmentStatus.ACTIVE,
+        },
+        include: {
+          lead: true,
+          group: {
+            include: {
+              course: true,
+              branch: true,
+            },
+          },
+        },
+      });
+
+      const updatedCount = group.currentStudents + 1;
+      await tx.group.update({
+        where: { id: group.id },
+        data: {
+          currentStudents: updatedCount,
+          status: updatedCount >= group.maxStudents ? 'FULL' : group.status,
+        },
+      });
+
+      await tx.lead.update({
+        where: { id: dto.leadId },
+        data: {
+          status: 'WON',
+        },
+      });
+
+      await tx.leadActivity.create({
+        data: {
+          leadId: dto.leadId,
+          type: 'STATUS_CHANGE',
+          title: "Kursga qabul qilindi (Guruhga biriktirildi)",
+          description: `Guruh: ${group.name}, Kurs: ${group.course.name}, Oylik to'lov: ${monthlyFee.toLocaleString('uz-UZ')} so'm`,
+          createdById,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          entityType: 'ENROLLMENT',
+          entityId: newEnrollment.id,
+          action: 'CREATE_ENROLLMENT',
+          changedById: createdById || null,
+          newValue: JSON.stringify({
+            leadId: dto.leadId,
+            groupId: dto.groupId,
+            monthlyFee,
+            leadName: lead.fullName,
+            groupName: group.name,
+          }),
+        },
+      });
+
+      return newEnrollment;
+    });
+
+    // Notify student on Telegram with Mini App WebApp button
+    if (lead.telegramId) {
+      const baseUrl = this.configService.get<string>('WEBAPP_BASE_URL') || 'http://localhost:3000';
+      const webAppUrl = `${baseUrl}/student?telegramId=${lead.telegramId}&enrollmentId=${enrollment.id}`;
+      const schedule = `${group.daysOfWeek} (${group.startTime} - ${group.endTime}), Xona: ${group.roomNumber || 'Asosiy'}`;
+
+      try {
+        await this.telegramService.sendEnrollmentNotification(
+          lead.telegramId,
+          group.course.name,
+          group.name,
+          schedule,
+          webAppUrl,
+        );
+      } catch (err: any) {
+        this.logger.error(`Talabaga telegram xabar yuborishda xatolik: ${err.message}`);
+      }
+    }
+
+    return enrollment;
+  }
+
+  async getAllEnrollments(query?: { groupId?: string; status?: EnrollmentStatus }) {
+    const whereClause: any = {};
+    if (query?.groupId) whereClause.groupId = query.groupId;
+    if (query?.status) whereClause.status = query.status;
+
+    return this.prisma.enrollment.findMany({
+      where: whereClause,
+      include: {
+        lead: true,
+        group: {
+          include: {
+            course: true,
+            branch: true,
+          },
+        },
+        attendances: {
+          orderBy: { date: 'desc' },
+        },
+        grades: {
+          orderBy: { date: 'desc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getEnrollmentById(id: string) {
+    const enrollment = await this.prisma.enrollment.findUnique({
+      where: { id },
+      include: {
+        lead: true,
+        group: {
+          include: {
+            course: true,
+            branch: true,
+          },
+        },
+        attendances: {
+          orderBy: { date: 'desc' },
+        },
+        grades: {
+          orderBy: { date: 'desc' },
+        },
+      },
+    });
+
+    if (!enrollment) {
+      throw new NotFoundException(`Qabul yozuvi topilmadi (ID: ${id})`);
+    }
+
+    return enrollment;
+  }
+
+  async getStudentPortalData(identifier: string) {
+    // Identifier can be leadId or telegramId
+    const lead = await this.prisma.lead.findFirst({
+      where: {
+        OR: [{ id: identifier }, { telegramId: identifier }],
+      },
+      include: {
+        payments: {
+          orderBy: { createdAt: 'desc' },
+        },
+        enrollments: {
+          include: {
+            group: {
+              include: {
+                course: true,
+                branch: true,
+              },
+            },
+            attendances: {
+              orderBy: { date: 'desc' },
+            },
+            grades: {
+              orderBy: { date: 'desc' },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    if (!lead) {
+      throw new NotFoundException(`O'quvchi topilmadi (ID yoki Telegram: ${identifier})`);
+    }
+
+    const processedEnrollments = lead.enrollments.map((enr) => {
+      const attendances = enr.attendances || [];
+      const grades = enr.grades || [];
+
+      const totalLessons = attendances.length;
+      const presentCount = attendances.filter((a) => a.status === 'PRESENT').length;
+      const lateCount = attendances.filter((a) => a.status === 'LATE').length;
+      const excusedCount = attendances.filter((a) => a.status === 'EXCUSED').length;
+      const absentCount = attendances.filter((a) => a.status === 'ABSENT').length;
+
+      const attendancePercentage =
+        totalLessons > 0
+          ? Math.round(((presentCount + lateCount * 0.8 + excusedCount * 0.5) / totalLessons) * 100)
+          : 100;
+
+      const averageGrade =
+        grades.length > 0
+          ? Math.round(grades.reduce((sum, g) => sum + g.score, 0) / grades.length)
+          : null;
+
+      return {
+        id: enr.id,
+        status: enr.status,
+        monthlyFee: enr.monthlyFee,
+        enrolledAt: enr.enrolledAt,
+        group: {
+          id: enr.group.id,
+          name: enr.group.name,
+          daysOfWeek: enr.group.daysOfWeek,
+          startTime: enr.group.startTime,
+          endTime: enr.group.endTime,
+          roomNumber: enr.group.roomNumber,
+          course: {
+            id: enr.group.course.id,
+            name: enr.group.course.name,
+            level: enr.group.course.level,
+            language: enr.group.course.language,
+            monthlyPrice: enr.group.course.monthlyPrice,
+          },
+          branch: {
+            id: enr.group.branch.id,
+            name: enr.group.branch.name,
+            address: enr.group.branch.address,
+            phone: enr.group.branch.phone,
+          },
+        },
+        stats: {
+          totalLessons,
+          presentCount,
+          lateCount,
+          excusedCount,
+          absentCount,
+          attendancePercentage,
+          averageGrade,
+          totalGradesCount: grades.length,
+        },
+        attendances,
+        grades,
+      };
+    });
+
+    return {
+      student: {
+        id: lead.id,
+        fullName: lead.fullName,
+        phone: lead.phone,
+        telegramId: lead.telegramId,
+        telegramUsername: lead.telegramUsername,
+        age: lead.age,
+      },
+      enrollments: processedEnrollments,
+      payments: lead.payments,
+    };
+  }
+
+  async getTeacherPortalData(teacherIdentifier?: string) {
+    const whereClause: any = {
+      status: { not: 'ARCHIVED' },
+    };
+    if (teacherIdentifier) {
+      whereClause.teacherId = teacherIdentifier;
+    }
+
+    const groups = await this.prisma.group.findMany({
+      where: whereClause,
+      include: {
+        course: true,
+        branch: true,
+        enrollments: {
+          where: { status: 'ACTIVE' },
+          include: {
+            lead: true,
+            attendances: {
+              orderBy: { date: 'desc' },
+              take: 15,
+            },
+            grades: {
+              orderBy: { date: 'desc' },
+              take: 15,
+            },
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    return {
+      teacherIdentifier: teacherIdentifier || 'all',
+      today: new Date().toISOString().split('T')[0],
+      groups: groups.map((g) => ({
+        id: g.id,
+        name: g.name,
+        courseName: g.course.name,
+        branchName: g.branch.name,
+        daysOfWeek: g.daysOfWeek,
+        startTime: g.startTime,
+        endTime: g.endTime,
+        roomNumber: g.roomNumber,
+        maxStudents: g.maxStudents,
+        currentStudents: g.currentStudents,
+        students: g.enrollments.map((e) => {
+          const grades = e.grades || [];
+          const attendances = e.attendances || [];
+          const avg = grades.length > 0
+            ? Math.round(grades.reduce((acc, curr) => acc + curr.score, 0) / grades.length)
+            : null;
+
+          return {
+            enrollmentId: e.id,
+            leadId: e.lead.id,
+            fullName: e.lead.fullName,
+            phone: e.lead.phone,
+            telegramId: e.lead.telegramId,
+            averageGrade: avg,
+            recentAttendances: attendances,
+            recentGrades: grades,
+          };
+        }),
+      })),
+    };
+  }
+}
