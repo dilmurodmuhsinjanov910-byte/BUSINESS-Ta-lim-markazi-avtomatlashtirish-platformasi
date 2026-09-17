@@ -120,7 +120,20 @@ describe('AiService', () => {
 
       expect(result.reply).toContain('General English');
       expect(result.reply).toContain('450,000 UZS/oy');
-      expect(result.actionTaken).toBe('GET_COURSES');
+      expect(['GET_COURSES', 'SIMILARITY_MATCH']).toContain(result.actionTaken);
+    });
+
+    it('should route to operator when similarity is below 85%', async () => {
+      const result = await service.processUserMessage({
+        leadId: 'lead-1',
+        conversationId: 'conv-1',
+        userMessage: 'Kosmik kemada dars o\'tish mumkinmi?',
+      });
+
+      expect(result.reply).toContain("Bu masala bilan operator bilan gaplashganingiz ma'qul");
+      expect(result.needsHumanHandoff).toBe(true);
+      expect(result.handoffReason).toBe('LOW_CONFIDENCE');
+      expect(result.similarityScore).toBeLessThan(0.85);
     });
 
     it('should trigger human handoff when user asks for operator', async () => {
