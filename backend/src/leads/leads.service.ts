@@ -5,6 +5,7 @@ import { LeadStatus, LeadSource, ScoreTier, ActivityType } from '@prisma/client'
 export interface CreateOrUpdateLeadDto {
   fullName: string;
   phone?: string;
+  age?: number;
   telegramId?: string;
   telegramUsername?: string;
   source?: LeadSource;
@@ -83,6 +84,7 @@ export class LeadsService {
         data: {
           fullName: dto.fullName || existing.fullName,
           phone: phoneToSet,
+          age: dto.age !== undefined ? dto.age : existing.age,
           telegramId: dto.telegramId || existing.telegramId,
           telegramUsername: dto.telegramUsername || existing.telegramUsername,
           preferredLanguage: dto.preferredLanguage || existing.preferredLanguage,
@@ -117,6 +119,7 @@ export class LeadsService {
       data: {
         fullName: dto.fullName,
         phone: normalizedPhone || (dto.telegramId ? `tg_${dto.telegramId}` : 'NOMA\'LUM'),
+        age: dto.age,
         telegramId: dto.telegramId,
         telegramUsername: dto.telegramUsername,
         source: dto.source || LeadSource.TELEGRAM,

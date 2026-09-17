@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { TelegramService } from './telegram.service';
+import { TelegramService, parseNameAndAge } from './telegram.service';
 import { ConfigService } from '@nestjs/config';
 import { LeadsService } from '../leads/leads.service';
 import { AiService } from '../ai/ai.service';
@@ -47,6 +47,8 @@ describe('TelegramService', () => {
   const mockConversationsService = {
     findOrCreateForLead: jest.fn().mockResolvedValue({ id: 'conv-tg-1' }),
     triggerHandoff: jest.fn().mockResolvedValue({}),
+    addMessage: jest.fn().mockResolvedValue({ id: 'msg-1' }),
+    registerTelegramDispatcher: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -113,6 +115,34 @@ describe('TelegramService', () => {
       expect(mockConversationsService.findOrCreateForLead).toHaveBeenCalledWith('lead-tg-1', 'TELEGRAM');
       expect(mockConversationsService.triggerHandoff).toHaveBeenCalledWith('conv-tg-1', 'OPERATOR_REQUEST');
       expect(result.reply).toContain('administratorimizga yo\'naltirildi');
+    });
+  });
+
+  describe('Student Name & Age Qualification', () => {
+    it('should parse student name and age accurately', async () => {
+      const parsed1 = parseNameAndAge('Jasur Aliyev, 16 yosh');
+      expect(parsed1.fullName).toBe('Jasur Aliyev');
+      expect(parsed1.age).toBe(16);
+
+      const parsed2 = parseNameAndAge('Madina 14 yoshda');
+      expect(parsed2.fullName).toBe('Madina');
+      expect(parsed2.age).toBe(14);
+
+      const parsed3 = parseNameAndAge('Rustam');
+      expect(parsed3.fullName).toBe('Rustam');
+      expect(parsed3.age).toBeUndefined();
+    });
+
+    it('should qualify name and age via simulateNameAndAgeInput', async () => {
+      const res = await service.simulateNameAndAgeInput('123456789', 'Jasur Aliyev, 16 yosh');
+      expect(res.parsed.fullName).toBe('Jasur Aliyev');
+      expect(res.parsed.age).toBe(16);
+      expect(mockLeadsService.upsertLead).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fullName: 'Jasur Aliyev',
+          age: 16,
+        }),
+      );
     });
   });
 });
