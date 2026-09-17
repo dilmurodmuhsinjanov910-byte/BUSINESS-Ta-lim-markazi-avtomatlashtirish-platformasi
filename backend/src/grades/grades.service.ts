@@ -1,10 +1,16 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { TelegramService } from '../telegram/telegram.service';
 import { RecordGradeDto } from './dto/record-grade.dto';
 
 @Injectable()
 export class GradesService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(GradesService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private telegramService: TelegramService,
+  ) {}
 
   async recordGrade(dto: RecordGradeDto) {
     const enrollment = await this.prisma.enrollment.findUnique({
@@ -43,6 +49,22 @@ export class GradesService {
         },
       },
     });
+
+    // Send real-time grade alert if student has Telegram ID
+    const lead = enrollment.lead;
+    if (lead?.telegramId) {
+      this.telegramService
+        .sendGradeAlert(
+          lead.telegramId,
+          lead.fullName,
+          dto.title,
+          dto.score,
+          dto.maxScore ?? 100,
+          dto.gradeType ?? 'CLASSWORK',
+          dto.comment,
+        )
+        .catch((err: any) => this.logger.warn(`Baho xabarnomasi yuborilmadi: ${err.message}`));
+    }
 
     return grade;
   }

@@ -713,6 +713,134 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return false;
   }
 
+  // Send real-time attendance notification
+  async sendAttendanceAlert(
+    telegramId: string,
+    studentName: string,
+    status: string,
+    groupName: string,
+    dateStr: string,
+    note?: string,
+  ) {
+    let statusLabel = '✅ Darsda faol qatnashdi';
+    if (status === 'ABSENT') statusLabel = '❌ Darsda qatnashmadi (Yo\'q)';
+    else if (status === 'LATE') statusLabel = '⏰ Darsga kechikib keldi';
+    else if (status === 'EXCUSED') statusLabel = 'ℹ️ Darsda sababli qatnashmadi';
+
+    const text =
+      `📋 **Davomat xabarnomasi**\n\n` +
+      `Hurmatli **${studentName}**,\n` +
+      `🗓 **Sana:** ${dateStr}\n` +
+      `👥 **Guruh:** ${groupName}\n` +
+      `📌 **Holat:** ${statusLabel}\n` +
+      (note ? `📝 **Ustoz qaydi:** _${note}_\n` : '') +
+      `\nShaxsiy kabinetingiz orqali dars materiallari va topshiriqlarni ko'rishingiz mumkin.`;
+
+    if (this.bot) {
+      try {
+        await this.bot.telegram.sendMessage(telegramId, text, { parse_mode: 'Markdown' });
+        return true;
+      } catch (err: any) {
+        this.logger.error(`sendAttendanceAlert xatosi [${telegramId}]: ${err.message}`);
+        return false;
+      }
+    }
+    return true; // mock/test mode returns true
+  }
+
+  // Send real-time grade/score notification
+  async sendGradeAlert(
+    telegramId: string,
+    studentName: string,
+    title: string,
+    score: number,
+    maxScore: number,
+    gradeType: string,
+    comment?: string,
+  ) {
+    const text =
+      `⭐ **Yangi baho qo'yildi!**\n\n` +
+      `Hurmatli **${studentName}**,\n` +
+      `Ustozingiz sizga yangi ball qo'ydi:\n\n` +
+      `📝 **Vazifa:** ${title} (${gradeType})\n` +
+      `🎯 **Natija:** **${score}** / ${maxScore} ball\n` +
+      (comment ? `💬 **Ustoz fikri:** _${comment}_\n` : '') +
+      `\nO'qishlaringizda omad va yangi muvaffaqiyatlar tilaymiz!`;
+
+    if (this.bot) {
+      try {
+        await this.bot.telegram.sendMessage(telegramId, text, { parse_mode: 'Markdown' });
+        return true;
+      } catch (err: any) {
+        this.logger.error(`sendGradeAlert xatosi [${telegramId}]: ${err.message}`);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Send official payment receipt notification
+  async sendPaymentReceiptAlert(
+    telegramId: string,
+    studentName: string,
+    amount: number,
+    receiptNumber: string,
+    method: string,
+    dateStr: string,
+    notes?: string,
+  ) {
+    const text =
+      `🧾 **To'lov qabul qilindi (Elektron Kvitansiya)**\n\n` +
+      `Hurmatli **${studentName}**,\n` +
+      `To'lovingiz qabul qilindi va tizimga muvaffaqiyatli kiritildi:\n\n` +
+      `🔢 **Kvitansiya №:** \`${receiptNumber}\`\n` +
+      `💰 **To'lov summasi:** **${amount.toLocaleString()} UZS**\n` +
+      `💳 **To'lov usuli:** ${method}\n` +
+      `📅 **Sana:** ${dateStr}\n` +
+      (notes ? `📝 **Izoh:** ${notes}\n` : '') +
+      `\nAl-Xorazmiy ta'lim markazini tanlaganingiz uchun tashakkur!`;
+
+    if (this.bot) {
+      try {
+        await this.bot.telegram.sendMessage(telegramId, text, { parse_mode: 'Markdown' });
+        return true;
+      } catch (err: any) {
+        this.logger.error(`sendPaymentReceiptAlert xatosi [${telegramId}]: ${err.message}`);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Send polite payment reminder (debtor alert)
+  async sendPaymentReminderAlert(
+    telegramId: string,
+    studentName: string,
+    groupName: string,
+    courseName: string,
+    amountDue: number,
+    dueDate?: string,
+  ) {
+    const text =
+      `⏰ **Oylik to'lov eslatmasi**\n\n` +
+      `Hurmatli **${studentName}**,\n` +
+      `Sizning **${courseName}** (${groupName}) kursi bo'yicha navbatdagi oylik to'lov muddati yaqinlashmoqda:\n\n` +
+      `💵 **To'lanishi kerak:** **${amountDue.toLocaleString()} UZS**\n` +
+      (dueDate ? `📅 **To'lov muddati:** ${dueDate}\n` : '') +
+      `\nTo'lovni o'quv markazi ma'muriyati orqali amalga oshirishingiz mumkin. Savollaringiz bo'lsa, administrator bilan bog'laning.`;
+
+    if (this.bot) {
+      try {
+        await this.bot.telegram.sendMessage(telegramId, text, { parse_mode: 'Markdown' });
+        return true;
+      } catch (err: any) {
+        this.logger.error(`sendPaymentReminderAlert xatosi [${telegramId}]: ${err.message}`);
+        return false;
+      }
+    }
+    return true;
+  }
+
   // Simulated telegram dispatch for testing or webhook
   async simulateIncomingMessage(telegramId: string, fullName: string, text: string) {
     const { lead } = await this.leadsService.upsertLead({

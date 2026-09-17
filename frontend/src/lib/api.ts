@@ -207,5 +207,19 @@ export const crmApi = {
     comment?: string;
   }) => fetchApi<any>('/grades', { method: 'POST', body: JSON.stringify(dto) }),
   getGroupGrades: (groupId: string) => fetchApi<any[]>(`/grades/group/${groupId}`),
+
+  // Payments & Finance
+  getPayments: (status?: string) =>
+    fetchApi<any[]>(status ? `/payments?status=${status}` : '/payments'),
+  getFinanceSummary: () =>
+    fetchApi<any>('/payments/summary'),
+  getDebtors: () =>
+    fetchApi<any[]>('/payments/debtors'),
+  getReceipt: (paymentId: string) =>
+    fetchApi<any>(`/payments/${paymentId}/receipt`),
+  directPay: (dto: { leadId: string; amount: number; method: string; notes?: string }) =>
+    fetchApi<any>('/payments/direct-pay', { method: 'POST', body: JSON.stringify(dto) }),
+  notifyDebtor: (leadId: string) =>
+    fetchApi<any>(`/payments/notify-debtor/${leadId}`, { method: 'POST' }),
 };
 
