@@ -4,6 +4,8 @@ import { Telegraf, Markup } from 'telegraf';
 import { LeadsService } from '../leads/leads.service';
 import { AiService } from '../ai/ai.service';
 import { ConversationsService } from '../conversations/conversations.service';
+import { BookingsService } from '../bookings/bookings.service';
+import { GroupsService } from '../groups/groups.service';
 import { LeadSource, LeadStatus, MessageSender } from '@prisma/client';
 
 export function parseNameAndAge(text: string, fallbackName = 'Foydalanuvchi'): { fullName: string; age?: number } {
@@ -45,6 +47,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private leadsService: LeadsService,
     private aiService: AiService,
     private conversationsService: ConversationsService,
+    private bookingsService: BookingsService,
+    private groupsService: GroupsService,
   ) {}
 
   async onModuleInit() {
@@ -154,24 +158,49 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const from = ctx.from;
       const fullName = [from.first_name, from.last_name].filter(Boolean).join(' ') || 'Foydalanuvchi';
       const result = await this.handleTrialRequest(String(from.id), fullName);
-      await ctx.reply(result.reply, { parse_mode: 'Markdown' });
+      if (result.inlineKeyboard) {
+        await ctx.reply(result.reply, { parse_mode: 'Markdown', ...result.inlineKeyboard }).catch(async () => {
+          await ctx.reply(result.reply, result.inlineKeyboard);
+        });
+      } else {
+        await ctx.reply(result.reply);
+      }
     });
 
+    // Handle 1-tap trial booking inline callback
+    this.bot.action(/^trial_book:(.+)$/, async (ctx) => {
+      const groupId = ctx.match[1];
+      const from = ctx.from;
+      const fullName = [from.first_name, from.last_name].filter(Boolean).join(' ') || 'Foydalanuvchi';
+      const result = await this.handleConfirmTrialBooking(String(from.id), fullName, groupId);
+      await ctx.answerCbQuery(result.alertText || 'Muvaffaqiyatli band qilindi!').catch(() => {});
+      await ctx.reply(result.reply, { parse_mode: 'Markdown' }).catch(async () => {
+        await ctx.reply(result.reply);
+      });
+    });
+
+    this.bot.action('cancel_trial_book', async (ctx) => {
+      await ctx.answerCbQuery('Bekor qilindi').catch(() => {});
+      await ctx.reply("Sinov darsiga yozilish bekor qilindi. Boshqa savollaringiz bo'lsa, bemalol so'rang!");
+    });
+
+    // Handle interactive FAQ Menu
     this.bot.hears('❓ Savollaringiz bormi?', async (ctx) => {
-      const faqText =
-        `❓ *Savollaringiz bormi? Bemalol so'rang!*\n\n` +
-        `Bizning aqlli yordamchimiz o'quv markazimiz bo'yicha har qanday savolingizga darhol javob beradi.\n\n` +
-        `📌 *Quyidagi mavzularda bemalol savol berishingiz mumkin:*\n` +
-        `• 📚 Kurslar narxlari va to'lov usullari (Payme, Click, naqd)\n` +
-        `• ⏰ Dars jadvali (ertalabki, tushki, kechki guruhlar)\n` +
-        `• 📍 Filiallarimiz manzillari va mo'ljallari\n` +
-        `• 🎁 Bepul sinov darsiga yozilish qoidalari\n` +
-        `• 👨‍🏫 O'qituvchilar malakasi va sertifikatlari\n` +
-        `• 💰 Chegirmalar va maxsus aksiyalar\n\n` +
-        `💡 *Savolingizni shunchaki pastdagi xabar yozish maydoniga yozib yuboring!*\n` +
-        `Masalan: *"General English narxi qancha?"* yoki *"Chilonzor filiali qayerda joylashgan?"*`;
-      await ctx.reply(faqText, { parse_mode: 'Markdown' }).catch(async () => {
-        await ctx.reply(faqText);
+      const faqMenu = this.getFaqMenu();
+      await ctx.reply(faqMenu.text, { parse_mode: 'Markdown', ...faqMenu.keyboard }).catch(async () => {
+        await ctx.reply(faqMenu.text, faqMenu.keyboard);
+      });
+    });
+
+    // Handle FAQ inline callback actions
+    this.bot.action(/^faq:(.+)$/, async (ctx) => {
+      const faqKey = ctx.match[1];
+      const from = ctx.from;
+      const fullName = [from.first_name, from.last_name].filter(Boolean).join(' ') || 'Foydalanuvchi';
+      const result = await this.handleFaqAnswer(String(from.id), fullName, faqKey);
+      await ctx.answerCbQuery().catch(() => {});
+      await ctx.reply(result.reply, { parse_mode: 'Markdown' }).catch(async () => {
+        await ctx.reply(result.reply);
       });
     });
 
@@ -248,7 +277,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     return { lead, reply, keyboard, conversationId: conv.id };
   }
 
-  // Trial request handling
+  // Trial request handling with interactive Inline Buttons
   async handleTrialRequest(telegramId: string, fullName: string) {
     const { lead } = await this.leadsService.upsertLead({
       fullName,
@@ -267,17 +296,211 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    let reply = "Sinov darsiga yozilish uchun ochiq guruhlar:\n\n";
+    let reply =
+      "🎁 **Bepul sinov darsiga yozilish**\n\n" +
+      "Quyidagi ochiq guruhlardan birini tanlang. Tanlagan zahotingiz qabulxona tizimida joy siz uchun band qilinadi:\n\n";
+
     groups.forEach((g: any, idx: number) => {
       reply += `${idx + 1}. **${g.courseName}** (${g.name})\n` +
         `   • Filial: ${g.branchName}\n` +
         `   • Kunlar: ${g.daysOfWeek}\n` +
         `   • Vaqt: ${g.timeSlot}\n` +
-        `   • Bo'sh joylar: ${g.availableSeats} ta\n\n`;
+        `   • Bo'sh o'rinlar: ${g.availableSeats} ta\n\n`;
     });
-    reply += "Qaysi filial va vaqt sizga qulay? Guruh nomini yozsangiz sizni ro'yxatga olamiz!";
 
-    return { reply, groups, leadId: lead.id };
+    const buttons = groups.map((g: any) => [
+      Markup.button.callback(
+        `👉 ${g.courseName} (${g.branchName.split(' ')[0]} - ${g.timeSlot})`,
+        `trial_book:${g.id}`,
+      ),
+    ]);
+    buttons.push([Markup.button.callback('❌ Bekor qilish', 'cancel_trial_book')]);
+
+    return {
+      reply,
+      groups,
+      inlineKeyboard: Markup.inlineKeyboard(buttons),
+      leadId: lead.id,
+    };
+  }
+
+  // 1-Tap Booking execution from inline callback
+  async handleConfirmTrialBooking(telegramId: string, fullName: string, groupId: string) {
+    const { lead } = await this.leadsService.upsertLead({
+      fullName,
+      telegramId,
+      source: LeadSource.TELEGRAM,
+    });
+
+    const conv = await this.conversationsService.findOrCreateForLead(lead.id, 'TELEGRAM');
+
+    // Default booking date: tomorrow at 10:00 AM
+    const bookingDate = new Date();
+    bookingDate.setDate(bookingDate.getDate() + 1);
+    bookingDate.setHours(10, 0, 0, 0);
+
+    try {
+      const booking = await this.bookingsService.createBooking({
+        leadId: lead.id,
+        groupId,
+        bookingDate: bookingDate.toISOString(),
+        notes: 'Telegram bot orqali 1-bosishda bron qilindi',
+      });
+
+      const fullBooking = await this.bookingsService.findOne(booking.id);
+
+      const dateStr = bookingDate.toLocaleDateString('uz-UZ', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+
+      const courseName = fullBooking.group?.course?.name || 'Kurs';
+      const groupName = fullBooking.group?.name || '';
+      const branchName = fullBooking.branch?.name || '';
+      const branchAddress = fullBooking.branch?.address || '';
+      const timeSlot = fullBooking.timeSlot || `${fullBooking.group?.startTime} - ${fullBooking.group?.endTime}`;
+      const days = fullBooking.group?.daysOfWeek || '';
+
+      const reply =
+        `🎉 **Tabriklaymiz! Siz muvaffaqiyatli sinov darsiga yozildingiz!**\n\n` +
+        `📚 **Kurs:** ${courseName}\n` +
+        `👥 **Guruh:** ${groupName}\n` +
+        `📍 **Filial:** ${branchName} (${branchAddress})\n` +
+        `📅 **Sana:** ${dateStr}\n` +
+        `⏰ **Dars vaqti:** ${days}, ${timeSlot}\n\n` +
+        `🔔 Dars boshlanishidan 24 soat va 2 soat oldin sizga eslatma yuboramiz.\n` +
+        `Biz sizni o'quv markazimizda kutib qolamiz! 😊`;
+
+      await this.conversationsService.addMessage({
+        conversationId: conv.id,
+        senderType: MessageSender.SYSTEM,
+        content: `🎁 Sinov darsi band qilindi: ${courseName} (${groupName}) - ${branchName}`,
+      });
+
+      return {
+        success: true,
+        booking,
+        reply,
+        alertText: 'Sinov darsi muvaffaqiyatli band qilindi!',
+      };
+    } catch (err: any) {
+      this.logger.warn(`Sinov darsini bron qilishda xato: ${err.message}`);
+      const reply =
+        `Kechirasiz, sinov darsini bron qilib bo'lmadi:\n*${err.message}*\n\n` +
+        `Boshqa guruhni tanlashingiz yoki "📞 Operator bilan bog'lanish" orqali mutaxassis yordamidan foydalanishingiz mumkin.`;
+
+      return {
+        success: false,
+        reply,
+        alertText: err.message,
+      };
+    }
+  }
+
+  // FAQ Menu definitions
+  getFaqMenu() {
+    const text =
+      `❓ **Eng ko'p beriladigan savollar (FAQ)**\n\n` +
+      `Quyidagi mavzulardan birini tanlang va bir zumda to'liq ma'lumot oling, yoki savolingizni pastga erkin matn sifatida yozib qoldiring:`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('💰 Kurs narxlari va to\'lov', 'faq:pricing'),
+        Markup.button.callback('⏰ Dars jadvali va kunlari', 'faq:schedule'),
+      ],
+      [
+        Markup.button.callback('📍 Filiallar manzillari', 'faq:branches'),
+        Markup.button.callback('👨‍🏫 O\'qituvchilar tarkibi', 'faq:teachers'),
+      ],
+      [
+        Markup.button.callback('🎁 Bepul dars tartibi', 'faq:trial'),
+        Markup.button.callback('📞 Operatorga ulanish', 'faq:operator'),
+      ],
+    ]);
+
+    return { text, keyboard };
+  }
+
+  // Answer selected FAQ item instantly
+  async handleFaqAnswer(telegramId: string, fullName: string, faqKey: string) {
+    const { lead } = await this.leadsService.upsertLead({
+      fullName,
+      telegramId,
+      source: LeadSource.TELEGRAM,
+    });
+    const conv = await this.conversationsService.findOrCreateForLead(lead.id, 'TELEGRAM');
+
+    let reply = '';
+    const action = 'FAQ_' + faqKey.toUpperCase();
+
+    if (faqKey === 'pricing') {
+      reply =
+        `💰 **Kurslarimizning rasmiy narxlari va to'lov usullari:**\n\n` +
+        `• 🇬🇧 **General English (Beginner - Advanced):** 450,000 - 520,000 so'm/oy\n` +
+        `• 🎯 **IELTS Intensive (Band 7.0+):** 750,000 so'm/oy (Barcha Mock Examlar bepul)\n` +
+        `• 🇷🇺 **Rus tili (So'zlashuv va Grammatika):** 420,000 so'm/oy\n\n` +
+        `💳 **To'lov usullari:** Click, Payme, Uzum va naqd pul. Barcha to'lovlarga qonuniy chek taqdim etiladi.\n` +
+        `👨‍👩‍👦 Bir oiladan 2 va undan ortiq o'quvchi uchun **10% doimiy chegirma** mavjud!`;
+    } else if (faqKey === 'schedule') {
+      reply =
+        `⏰ **Dars jadvallari va kunlari:**\n\n` +
+        `• **Toq kunlar:** Dushanba - Chorshanba - Juma\n` +
+        `• **Juft kunlar:** Seshanba - Payshanba - Shanba\n\n` +
+        `🕒 **Qulay vaqt smenalari:**\n` +
+        `• Ertalabki: 09:00 - 10:20\n` +
+        `• Tushki: 14:00 - 15:20\n` +
+        `• Kechki: 18:30 - 20:00\n\n` +
+        `Darslar 80-90 daqiqadan haftada 3 marotaba olib boriladi.`;
+    } else if (faqKey === 'branches') {
+      reply =
+        `📍 **Bizning filiallarimiz:**\n\n` +
+        `1. **Chilonzor filiali:**\n` +
+        `   • Mo'ljal: Chilonzor metro bekati, 2-chiqish, 12-uy\n` +
+        `   • Telefon: +998 71 200 11 22\n` +
+        `   • Ish vaqti: 08:30 - 20:30 (Dush-Shanba)\n\n` +
+        `2. **Yunusobod filiali:**\n` +
+        `   • Mo'ljal: Shahriston metrosi yaqinida, Amir Temur ko'chasi 45-uy\n` +
+        `   • Telefon: +998 71 200 33 44\n` +
+        `   • Ish vaqti: 08:30 - 20:30 (Dush-Shanba)`;
+    } else if (faqKey === 'teachers') {
+      reply =
+        `👨‍🏫 **O'qituvchilarimiz malakasi:**\n\n` +
+        `• Markazimiz ustozlari xalqaro **IELTS 8.0 - 8.5** va **CELTA / TESOL** sertifikatlariga ega.\n` +
+        `• O'rtacha 5+ yillik pedagogik tajriba.\n` +
+        `• Zamonaviy interaktiv metodika va individual yondashuv kafolatlanadi.`;
+    } else if (faqKey === 'trial') {
+      reply =
+        `🎁 **Bepul sinov darsi shartlari:**\n\n` +
+        `• Birinchi dars 100% BEPUL.\n` +
+        `• Darsda o'qituvchi bilan tanishasiz, muhitni ko'rasiz va bilim darajangiz (Placement test) aniqlanadi.\n` +
+        `• Dars sizga ma'qul kelsa, guruhga a'zo bo'lasiz.\n\n` +
+        `Sinov darsiga yozilish uchun "🎁 Bepul sinov darsiga yozilish" tugmasini bosing!`;
+    } else if (faqKey === 'operator') {
+      const opResult = await this.handleOperatorRequest(telegramId, fullName);
+      return {
+        reply: opResult.reply,
+        action: 'FAQ_OPERATOR',
+        conversationId: opResult.conversationId,
+        leadId: opResult.leadId,
+      };
+    } else {
+      reply = "Kechirasiz, ushbu bo'lim bo'yicha ma'lumot topilmadi.";
+    }
+
+    // Save user interaction to conversation history
+    await this.conversationsService.addMessage({
+      conversationId: conv.id,
+      senderType: MessageSender.USER,
+      content: `[FAQ so'rovi]: ${faqKey}`,
+    });
+    await this.conversationsService.addMessage({
+      conversationId: conv.id,
+      senderType: MessageSender.AI,
+      content: reply,
+    });
+
+    return { reply, action };
   }
 
   // Human handoff request routing
@@ -451,5 +674,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   async simulateOperatorRequest(telegramId: string, fullName: string) {
     return this.handleOperatorRequest(telegramId, fullName);
+  }
+
+  async simulateTrialRequest(telegramId: string, fullName: string) {
+    return this.handleTrialRequest(telegramId, fullName);
+  }
+
+  async simulateTrialConfirm(telegramId: string, fullName: string, groupId: string) {
+    return this.handleConfirmTrialBooking(telegramId, fullName, groupId);
+  }
+
+  async simulateFaq(telegramId: string, fullName: string, faqKey: string) {
+    return this.handleFaqAnswer(telegramId, fullName, faqKey);
   }
 }

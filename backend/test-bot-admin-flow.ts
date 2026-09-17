@@ -69,6 +69,49 @@ async function testBotAndAdminFlow() {
     const nameAgeData = await nameAgeRes.json();
     console.log(`   -> [TASDIQLANDI]: O'quvchi ma'lumotlari parslendi: Ism: "${nameAgeData.parsed?.fullName}", Yosh: ${nameAgeData.parsed?.age}\n`);
 
+    // 3.2. User clicks FAQ Inline buttons
+    console.log('3.2. Foydalanuvchi "FAQ: Narxlar va to\'lov" inline tugmasini bosmoqda...');
+    const faqRes = await fetch(`${BACKEND_URL}/telegram/simulate-faq`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        telegramId: randomTgId,
+        fullName: testUserName,
+        faqKey: 'pricing',
+      }),
+    });
+    const faqData = await faqRes.json();
+    console.log(`   -> [TASDIQLANDI]: FAQ javobi qaytarildi: "${faqData.reply?.slice(0, 70)}..."\n`);
+
+    // 3.3. User requests trial lessons and confirms 1-tap booking
+    console.log('3.3. Foydalanuvchi "🎁 Bepul sinov darsiga yozilish" inline tugmasini bosmoqda...');
+    const trialReqRes = await fetch(`${BACKEND_URL}/telegram/simulate-trial-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        telegramId: randomTgId,
+        fullName: testUserName,
+      }),
+    });
+    const trialReqData = await trialReqRes.json();
+    console.log(`   -> [TASDIQLANDI]: Ochiq guruhlar ro'yxati chiqdi: ${trialReqData.groups?.length} ta ochiq guruh`);
+
+    if (trialReqData.groups && trialReqData.groups.length > 0) {
+      const selectedGroup = trialReqData.groups[0];
+      console.log(`      1-Tap Bron qilinmoqda: [Guruh: ${selectedGroup.name}, Kurs: ${selectedGroup.courseName}]...`);
+      const trialConfirmRes = await fetch(`${BACKEND_URL}/telegram/simulate-trial-confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telegramId: randomTgId,
+          fullName: testUserName,
+          groupId: selectedGroup.id,
+        }),
+      });
+      const trialConfirmData = await trialConfirmRes.json();
+      console.log(`   -> [TASDIQLANDI]: Sinov darsi muvaffaqiyatli band qilindi: ${trialConfirmData.alertText}\n`);
+    }
+
     // 4. Verify data arrived in Admin Panel Leads CRM
     console.log('4. Admin Panelda yangi lead va uning yoshi aks etganini tekshirish...');
     const leadsRes = await fetch(`${FRONTEND_URL}/leads?search=${testPhone}`, {

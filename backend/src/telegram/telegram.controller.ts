@@ -24,4 +24,19 @@ export class TelegramController {
   async simulateNameAge(@Body() body: { telegramId: string; text: string }) {
     return this.telegramService.simulateNameAndAgeInput(body.telegramId, body.text);
   }
+
+  @Post('simulate-trial-request')
+  async simulateTrialRequest(@Body() body: { telegramId: string; fullName: string }) {
+    return this.telegramService.simulateTrialRequest(body.telegramId, body.fullName);
+  }
+
+  @Post('simulate-trial-confirm')
+  async simulateTrialConfirm(@Body() body: { telegramId: string; fullName: string; groupId: string }) {
+    return this.telegramService.simulateTrialConfirm(body.telegramId, body.fullName, body.groupId);
+  }
+
+  @Post('simulate-faq')
+  async simulateFaq(@Body() body: { telegramId: string; fullName: string; faqKey: string }) {
+    return this.telegramService.simulateFaq(body.telegramId, body.fullName, body.faqKey);
+  }
 }
