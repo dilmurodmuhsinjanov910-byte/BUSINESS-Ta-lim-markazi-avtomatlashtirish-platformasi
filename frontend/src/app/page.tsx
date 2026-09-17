@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { crmApi, ensureAuthenticated } from "@/lib/api";
 import {
   Users,
   CalendarCheck,
@@ -32,6 +33,9 @@ export default function AdminPortal() {
     "dashboard" | "leads" | "trials" | "conversations" | "courses" | "kb" | "tasks" | "audit"
   >("dashboard");
 
+  const [isConnectedToBackend, setIsConnectedToBackend] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   // Sample and live state
   const [kpis, setKpis] = useState({
     totalLeads: 42,
@@ -45,7 +49,7 @@ export default function AdminPortal() {
     conversionRate: 21,
   });
 
-  const [funnel] = useState([
+  const [funnel, setFunnel] = useState([
     { stage: "Yangi (NEW)", count: 42, color: "bg-blue-500", pct: 100 },
     { stage: "Bog'lanildi (CONTACTED)", count: 34, color: "bg-indigo-500", pct: 80 },
     { stage: "Saralandi (QUALIFIED)", count: 26, color: "bg-purple-500", pct: 62 },
@@ -177,7 +181,7 @@ export default function AdminPortal() {
   const [selectedConv, setSelectedConv] = useState(conversations[0]);
   const [adminReply, setAdminReply] = useState("");
 
-  const [courses] = useState([
+  const [courses, setCourses] = useState([
     {
       id: "c-1",
       name: "General English (Beginner)",
@@ -277,7 +281,7 @@ export default function AdminPortal() {
     },
   ]);
 
-  const [auditLogs] = useState([
+  const [auditLogs, setAuditLogs] = useState([
     {
       id: "a-1",
       entity: "TrialBooking",
@@ -304,6 +308,161 @@ export default function AdminPortal() {
     },
   ]);
 
+  // Load real data from backend
+  const refreshData = async () => {
+    setIsRefreshing(true);
+    try {
+      await ensureAuthenticated();
+      const [kpiData, funnelData, leadsData, bookingsData, convsData, coursesData, kbData, tasksData, auditData] =
+        await Promise.allSettled([
+          crmApi.getKpis(),
+          crmApi.getFunnel(),
+          crmApi.getLeads(),
+          crmApi.getBookings(),
+          crmApi.getConversations(),
+          crmApi.getCourses(),
+          crmApi.getKnowledgeBase(),
+          crmApi.getTasks(),
+          crmApi.getAuditLogs(),
+        ]);
+
+      let anySuccess = false;
+
+      if (kpiData.status === "fulfilled" && kpiData.value) {
+        setKpis(kpiData.value);
+        anySuccess = true;
+      }
+      if (funnelData.status === "fulfilled" && funnelData.value?.funnel) {
+        const colors = ["bg-blue-500", "bg-indigo-500", "bg-purple-500", "bg-amber-500", "bg-emerald-500", "bg-green-600"];
+        const total = funnelData.value.funnel[0]?.count || 1;
+        setFunnel(
+          funnelData.value.funnel.map((f: any, i: number) => ({
+            stage: f.stage,
+            count: f.count,
+            color: colors[i % colors.length],
+            pct: Math.round((f.count / (total || 1)) * 100),
+          }))
+        );
+        anySuccess = true;
+      }
+      if (leadsData.status === "fulfilled" && Array.isArray(leadsData.value) && leadsData.value.length > 0) {
+        setLeads(
+          leadsData.value.map((l: any) => ({
+            id: l.id,
+            fullName: l.fullName,
+            phone: l.phone,
+            source: l.source,
+            score: l.score,
+            scoreTier: l.scoreTier,
+            status: l.status,
+            lostReason: l.lostReason,
+            preferredCourse: l.preferredCourse || "General English",
+            preferredBranch: l.preferredBranch?.name || "Chilonzor filiali",
+            createdAt: new Date(l.createdAt).toLocaleDateString(),
+          }))
+        );
+        anySuccess = true;
+      }
+      if (bookingsData.status === "fulfilled" && Array.isArray(bookingsData.value) && bookingsData.value.length > 0) {
+        setTrials(
+          bookingsData.value.map((b: any) => ({
+            id: b.id,
+            leadName: b.lead?.fullName || "Noma'lum",
+            course: b.group?.course?.name || "Kurs",
+            group: b.group?.name || "Guruh",
+            branch: b.branch?.name || "Filial",
+            date: new Date(b.bookingDate).toLocaleDateString(),
+            time: b.timeSlot,
+            status: b.status,
+            capacity: `${b.group?.currentStudents || 0}/${b.group?.maxStudents || 12}`,
+          }))
+        );
+        anySuccess = true;
+      }
+      if (convsData.status === "fulfilled" && Array.isArray(convsData.value) && convsData.value.length > 0) {
+        const mapped = convsData.value.map((c: any) => ({
+          id: c.id,
+          leadName: c.lead?.fullName || "Foydalanuvchi",
+          phone: c.lead?.phone || "",
+          status: c.status,
+          handoffReason: c.handoffReason,
+          lastMessage: c.messages?.[c.messages.length - 1]?.content || "Xabar yo'q",
+          time: new Date(c.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          messages: (c.messages || []).map((m: any) => ({
+            sender: m.senderType,
+            text: m.content,
+          })),
+        }));
+        setConversations(mapped);
+        if (mapped[0]) setSelectedConv(mapped[0]);
+        anySuccess = true;
+      }
+      if (coursesData.status === "fulfilled" && Array.isArray(coursesData.value) && coursesData.value.length > 0) {
+        setCourses(
+          coursesData.value.map((c: any) => ({
+            id: c.id,
+            name: c.name,
+            price: `${c.monthlyPrice.toLocaleString()} UZS/oy`,
+            duration: `${c.durationMonths} oy (haftada ${c.lessonsPerWeek} kun)`,
+            groupsCount: c._count?.groups || 1,
+            status: c.isActive ? "FAOL" : "NOFAOL",
+          }))
+        );
+        anySuccess = true;
+      }
+      if (kbData.status === "fulfilled" && Array.isArray(kbData.value) && kbData.value.length > 0) {
+        setKbArticles(
+          kbData.value.map((k: any) => ({
+            id: k.id,
+            title: k.title,
+            category: k.category,
+            status: k.status,
+            views: k.viewCount || 0,
+            content: k.content,
+          }))
+        );
+        anySuccess = true;
+      }
+      if (tasksData.status === "fulfilled" && Array.isArray(tasksData.value) && tasksData.value.length > 0) {
+        setTasks(
+          tasksData.value.map((t: any) => ({
+            id: t.id,
+            title: t.title,
+            type: t.taskType,
+            priority: t.priority,
+            status: t.status,
+            leadPhone: t.lead?.phone || "+998901234567",
+            desc: t.description || "",
+          }))
+        );
+        anySuccess = true;
+      }
+      if (auditData.status === "fulfilled" && Array.isArray(auditData.value) && auditData.value.length > 0) {
+        setAuditLogs(
+          auditData.value.map((a: any) => ({
+            id: a.id,
+            entity: a.entityType,
+            action: a.action,
+            user: a.changedBy?.fullName || "Tizim",
+            reason: a.reason || "Avtomatik qayd",
+            time: new Date(a.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          }))
+        );
+        anySuccess = true;
+      }
+
+      setIsConnectedToBackend(anySuccess);
+    } catch (err) {
+      console.warn("Backend sync failed, using cache:", err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshData();
+  }, []);
+
   // Modals / forms state
   const [showNewLeadModal, setShowNewLeadModal] = useState(false);
   const [newLeadName, setNewLeadName] = useState("");
@@ -323,31 +482,50 @@ export default function AdminPortal() {
     return matchSearch && matchScore;
   });
 
-  const handleAddLead = (e: React.FormEvent) => {
+  const handleAddLead = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newLeadName || !newLeadPhone) return;
 
-    // Check deduplication
-    const existingIndex = leads.findIndex((l) => l.phone.includes(newLeadPhone.trim()));
-    if (existingIndex !== -1) {
-      alert(`[DE-DUPLICATION]: ${newLeadPhone} raqamli o'quvchi allaqachon mavjud! Dublikat yaratilmadi, uning bali oshirildi va faolligi yangilandi.`);
-      const updated = [...leads];
-      updated[existingIndex].score = Math.min(100, updated[existingIndex].score + 10);
-      setLeads(updated);
-    } else {
-      const newEntry = {
-        id: `lead-${Date.now()}`,
+    try {
+      const res = await crmApi.createLead({
         fullName: newLeadName,
-        phone: newLeadPhone.startsWith("+") ? newLeadPhone : `+998${newLeadPhone}`,
-        source: newLeadSource,
-        score: 65,
-        scoreTier: "WARM",
-        status: "NEW",
+        phone: newLeadPhone,
         preferredCourse: newLeadCourse,
-        preferredBranch: "Chilonzor filiali",
-        createdAt: "Hozirgina",
-      };
-      setLeads([newEntry, ...leads]);
+        source: newLeadSource,
+      });
+
+      if (res?.isDuplicate) {
+        alert(
+          `[DE-DUPLICATION]: ${newLeadPhone} raqamli o'quvchi allaqachon mavjud! Dublikat yaratilmadi, uning bali oshirildi: ${res.lead?.score} (${res.lead?.scoreTier}).`
+        );
+      } else {
+        alert(`[YANGI LEAD]: ${newLeadName} muvaffaqiyatli saqlandi!`);
+      }
+      await refreshData();
+    } catch (err: any) {
+      console.warn("API createLead failed, local fallback:", err.message);
+      const existingIndex = leads.findIndex((l) => l.phone.includes(newLeadPhone.trim()));
+      if (existingIndex !== -1) {
+        alert(`[DE-DUPLICATION]: ${newLeadPhone} raqamli o'quvchi allaqachon mavjud! Dublikat yaratilmadi, uning bali oshirildi.`);
+        const updated = [...leads];
+        updated[existingIndex].score = Math.min(100, updated[existingIndex].score + 10);
+        setLeads(updated);
+      } else {
+        const newEntry = {
+          id: `lead-${Date.now()}`,
+          fullName: newLeadName,
+          phone: newLeadPhone.startsWith("+") ? newLeadPhone : `+998${newLeadPhone}`,
+          source: newLeadSource,
+          score: 65,
+          scoreTier: "WARM",
+          status: "NEW",
+          lostReason: undefined,
+          preferredCourse: newLeadCourse,
+          preferredBranch: "Chilonzor filiali",
+          createdAt: "Hozirgina",
+        };
+        setLeads([newEntry, ...leads]);
+      }
     }
 
     setNewLeadName("");
@@ -355,34 +533,48 @@ export default function AdminPortal() {
     setShowNewLeadModal(false);
   };
 
-  const handleSendAdminMessage = () => {
+  const handleSendAdminMessage = async () => {
     if (!adminReply.trim()) return;
-    const updatedMessages = [
-      ...selectedConv.messages,
-      { sender: "ADMIN", text: adminReply },
-    ];
-    const updatedConv = {
-      ...selectedConv,
-      status: "ADMIN_HANDLING",
-      messages: updatedMessages,
-      lastMessage: adminReply,
-    };
-    setSelectedConv(updatedConv);
-    setConversations(conversations.map((c) => (c.id === updatedConv.id ? updatedConv : c)));
+    const msgText = adminReply;
     setAdminReply("");
+
+    try {
+      await crmApi.sendMessage(selectedConv.id, msgText);
+      await refreshData();
+    } catch (err: any) {
+      console.warn("API sendMessage failed, local fallback:", err.message);
+      const updatedMessages = [
+        ...selectedConv.messages,
+        { sender: "ADMIN", text: msgText },
+      ];
+      const updatedConv = {
+        ...selectedConv,
+        status: "ADMIN_HANDLING",
+        messages: updatedMessages,
+        lastMessage: msgText,
+      };
+      setSelectedConv(updatedConv);
+      setConversations(conversations.map((c) => (c.id === updatedConv.id ? updatedConv : c)));
+    }
   };
 
-  const handleResolveHandoff = () => {
-    const updated = {
-      ...selectedConv,
-      status: "RESOLVED",
-      messages: [
-        ...selectedConv.messages,
-        { sender: "SYSTEM", text: "[TIZIM]: Suhbat muvaffaqiyatli yakunlandi va yopildi." },
-      ],
-    };
-    setSelectedConv(updated);
-    setConversations(conversations.map((c) => (c.id === updated.id ? updated : c)));
+  const handleResolveHandoff = async () => {
+    try {
+      await crmApi.resolveConversation(selectedConv.id);
+      await refreshData();
+    } catch (err: any) {
+      console.warn("API resolve failed, local fallback:", err.message);
+      const updated = {
+        ...selectedConv,
+        status: "RESOLVED",
+        messages: [
+          ...selectedConv.messages,
+          { sender: "SYSTEM", text: "[TIZIM]: Suhbat muvaffaqiyatli yakunlandi va yopildi." },
+        ],
+      };
+      setSelectedConv(updated);
+      setConversations(conversations.map((c) => (c.id === updated.id ? updated : c)));
+    }
   };
 
   return (
@@ -566,10 +758,25 @@ export default function AdminPortal() {
           </div>
 
           <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>AI Zero-Hallucination Guard: Faol</span>
-            </div>
+            {isConnectedToBackend ? (
+              <div className="flex items-center space-x-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>API Bog'langan (Live)</span>
+              </div>
+            ) : (
+              <div className="flex items-center space-x-1.5 px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-semibold">
+                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                <span>Lokal Rejim</span>
+              </div>
+            )}
+            <button
+              onClick={refreshData}
+              title="Baza bilan qayta yangilash"
+              className="flex items-center space-x-1.5 px-3 py-2 border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold transition-colors shadow-xs"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-indigo-600" : ""}`} />
+              <span>Yangilash</span>
+            </button>
             <button
               onClick={() => setShowNewLeadModal(true)}
               className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-md shadow-indigo-600/20 transition-all"
@@ -861,22 +1068,27 @@ export default function AdminPortal() {
                         {tb.status === "BOOKED" && (
                           <div className="flex space-x-2 w-full">
                             <button
-                              onClick={() => {
-                                const updated = trials.map((t) =>
-                                  t.id === tb.id ? { ...t, status: "ATTENDED" } : t
-                                );
-                                setTrials(updated);
+                              onClick={async () => {
+                                try {
+                                  await crmApi.updateBookingStatus(tb.id, "ATTENDED");
+                                  await refreshData();
+                                } catch (e: any) {
+                                  alert(`Xatolik: ${e.message}`);
+                                }
                               }}
                               className="flex-1 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
                             >
                               Keldi (Attended)
                             </button>
                             <button
-                              onClick={() => {
-                                const updated = trials.map((t) =>
-                                  t.id === tb.id ? { ...t, status: "MISSED" } : t
-                                );
-                                setTrials(updated);
+                              onClick={async () => {
+                                const reason = prompt("Dars qoldirish sababini kiriting:") || "Sababsiz kelmadi";
+                                try {
+                                  await crmApi.updateBookingStatus(tb.id, "MISSED", reason);
+                                  await refreshData();
+                                } catch (e: any) {
+                                  alert(`Xatolik: ${e.message}`);
+                                }
                               }}
                               className="flex-1 py-1.5 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
                             >
@@ -1114,11 +1326,13 @@ export default function AdminPortal() {
                         <span>Ko'rishlar soni: {article.views} marta</span>
                         {article.status === "DRAFT" ? (
                           <button
-                            onClick={() => {
-                              const updated = kbArticles.map((a) =>
-                                a.id === article.id ? { ...a, status: "PUBLISHED" } : a
-                              );
-                              setKbArticles(updated);
+                            onClick={async () => {
+                              try {
+                                await crmApi.publishArticle(article.id);
+                                await refreshData();
+                              } catch (e: any) {
+                                alert(`Xatolik: ${e.message}`);
+                              }
                             }}
                             className="text-indigo-600 hover:text-indigo-800 font-semibold"
                           >
@@ -1172,11 +1386,13 @@ export default function AdminPortal() {
                       <div>
                         {task.status === "TODO" ? (
                           <button
-                            onClick={() => {
-                              const updated = tasks.map((t) =>
-                                t.id === task.id ? { ...t, status: "DONE" } : t
-                              );
-                              setTasks(updated);
+                            onClick={async () => {
+                              try {
+                                await crmApi.updateTask(task.id, { status: "DONE" });
+                                await refreshData();
+                              } catch (e: any) {
+                                alert(`Xatolik: ${e.message}`);
+                              }
                             }}
                             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs"
                           >
