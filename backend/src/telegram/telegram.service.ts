@@ -29,8 +29,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     try {
       this.bot = new Telegraf(token);
       this.setupHandlers();
-      await this.bot.launch();
-      this.logger.log('Telegram Bot muvaffaqiyatli ishga tushirildi (Polling).');
+      this.bot.launch().catch((err: any) => {
+        this.logger.error('Telegram bot ishida xato:', err.message);
+      });
+      this.logger.log('Telegram Bot muvaffaqiyatli ishga tushirildi (Polling faol).');
     } catch (err: any) {
       this.logger.error('Telegram botni ishga tushirishda xato:', err.message);
     }
