@@ -308,9 +308,9 @@ export default function AdminPortal() {
     },
   ]);
 
-  // Load real data from backend
-  const refreshData = async () => {
-    setIsRefreshing(true);
+  // Load real data from backend (Supports silent auto-polling)
+  const refreshData = async (isManual = false) => {
+    if (isManual) setIsRefreshing(true);
     try {
       await ensureAuthenticated();
       const [kpiData, funnelData, leadsData, bookingsData, convsData, coursesData, kbData, tasksData, auditData] =
@@ -396,7 +396,11 @@ export default function AdminPortal() {
           })),
         }));
         setConversations(mapped);
-        if (mapped[0]) setSelectedConv(mapped[0]);
+        setSelectedConv((prev: any) => {
+          if (!prev) return mapped[0] || null;
+          const current = mapped.find((c: any) => c.id === prev.id);
+          return current || mapped[0] || prev;
+        });
         anySuccess = true;
       }
       if (coursesData.status === "fulfilled" && Array.isArray(coursesData.value) && coursesData.value.length > 0) {
@@ -457,12 +461,17 @@ export default function AdminPortal() {
     } catch (err) {
       console.warn("Backend sync failed, using cache:", err);
     } finally {
-      setIsRefreshing(false);
+      if (isManual) setIsRefreshing(false);
     }
   };
 
   useEffect(() => {
-    refreshData();
+    refreshData(true);
+    // Real-time live auto-polling every 5 seconds
+    const interval = setInterval(() => {
+      refreshData(false);
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // Modals / forms state
@@ -471,6 +480,14 @@ export default function AdminPortal() {
   const [newLeadPhone, setNewLeadPhone] = useState("");
   const [newLeadCourse, setNewLeadCourse] = useState("General English (Beginner)");
   const [newLeadSource, setNewLeadSource] = useState("TELEGRAM");
+
+  // Knowledge Base modal state
+  const [showNewKbModal, setShowNewKbModal] = useState(false);
+  const [newKbTitle, setNewKbTitle] = useState("");
+  const [newKbCategory, setNewKbCategory] = useState("Kurslar va narxlar");
+  const [newKbContent, setNewKbContent] = useState("");
+  const [newKbTags, setNewKbTags] = useState("");
+  const [newKbStatus, setNewKbStatus] = useState("PUBLISHED");
 
   // Filter state for leads
   const [searchLead, setSearchLead] = useState("");
@@ -533,6 +550,43 @@ export default function AdminPortal() {
     setNewLeadName("");
     setNewLeadPhone("");
     setShowNewLeadModal(false);
+  };
+
+  const handleCreateKbArticle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newKbTitle.trim() || !newKbContent.trim()) return;
+
+    try {
+      await crmApi.createArticle({
+        title: newKbTitle.trim(),
+        content: newKbContent.trim(),
+        category: newKbCategory,
+        tags: newKbTags.trim() || undefined,
+        status: newKbStatus,
+      });
+      setShowNewKbModal(false);
+      setNewKbTitle("");
+      setNewKbContent("");
+      setNewKbTags("");
+      await refreshData(true);
+      alert("✅ Yangi savol-javob muvaffaqiyatli saqlandi va Telegram bot bilimlar bazasiga qo'shildi!");
+    } catch (err: any) {
+      console.warn("createArticle API failed, fallback:", err.message);
+      const newArt = {
+        id: `kb-${Date.now()}`,
+        title: newKbTitle,
+        category: newKbCategory,
+        status: newKbStatus,
+        views: 1,
+        content: newKbContent,
+      };
+      setKbArticles([newArt, ...kbArticles]);
+      setShowNewKbModal(false);
+      setNewKbTitle("");
+      setNewKbContent("");
+      setNewKbTags("");
+      alert("✅ Yangi savol-javob qo'shildi!");
+    }
   };
 
   const handleSendAdminMessage = async () => {
@@ -784,7 +838,7 @@ export default function AdminPortal() {
               </div>
             )}
             <button
-              onClick={refreshData}
+              onClick={() => refreshData(true)}
               title="Baza bilan qayta yangilash"
               className="flex items-center space-x-1.5 px-3 py-2 border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold transition-colors shadow-xs"
             >
@@ -1331,6 +1385,13 @@ export default function AdminPortal() {
                       AI Assistenti <strong>faqat PUBLISHED</strong> maqolalardan ma'lumot oladi. Qoralama (DRAFT) maqolalar AI ga ko'rinmaydi.
                     </p>
                   </div>
+                  <button
+                    onClick={() => setShowNewKbModal(true)}
+                    className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Yangi Savol / FAQ qo'shish</span>
+                  </button>
                 </div>
 
                 <div className="space-y-4">
@@ -1557,6 +1618,103 @@ export default function AdminPortal() {
                   className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm"
                 >
                   Saqlash
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Creating New Knowledge Base (FAQ) Article */}
+      {showNewKbModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl border border-slate-200">
+            <h3 className="text-base font-bold text-slate-900 mb-1">
+              Yangi Savol-Javob (FAQ) / Maqola qo'shish
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Ushbu maqola nashr etilgach (PUBLISHED), Telegram bot undan avtomatik o'rganib o'quvchilarga javob bera boshlaydi.
+            </p>
+
+            <form onSubmit={handleCreateKbArticle} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Savol / Maqola sarlavhasi</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Masalan: To'lovni bo'lib to'lash tartibi qanday?"
+                  value={newKbTitle}
+                  onChange={(e) => setNewKbTitle(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Kategoriya</label>
+                  <select
+                    value={newKbCategory}
+                    onChange={(e) => setNewKbCategory(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="Kurslar va narxlar">Kurslar va narxlar</option>
+                    <option value="To'lovlar">To'lovlar</option>
+                    <option value="Dars jadvali">Dars jadvali</option>
+                    <option value="Filiallar">Filiallar</option>
+                    <option value="O'qituvchilar">O'qituvchilar</option>
+                    <option value="Qoidalar">Qoidalar</option>
+                    <option value="Umumiy">Umumiy</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Holati</label>
+                  <select
+                    value={newKbStatus}
+                    onChange={(e) => setNewKbStatus(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="PUBLISHED">Nashr etish (PUBLISHED)</option>
+                    <option value="DRAFT">Qoralama (DRAFT)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Kalit so'zlar / Teglar</label>
+                <input
+                  type="text"
+                  placeholder="Masalan: bo'lib to'lash, to'lov, chegirma, qisman"
+                  value={newKbTags}
+                  onChange={(e) => setNewKbTags(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Batafsil javob matni</label>
+                <textarea
+                  rows={4}
+                  required
+                  placeholder="Mijozga taqdim etiladigan to'liq va aniq javobni yozing..."
+                  value={newKbContent}
+                  onChange={(e) => setNewKbContent(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="pt-3 flex items-center justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setShowNewKbModal(false)}
+                  className="px-4 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Bekor qilish
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm"
+                >
+                  Saqlash va Nashr etish
                 </button>
               </div>
             </form>

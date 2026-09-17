@@ -125,6 +125,8 @@ export const crmApi = {
 
   // Knowledge Base
   getKnowledgeBase: () => fetchApi<any[]>('/knowledge-base'),
+  createArticle: (dto: { title: string; content: string; category?: string; tags?: string; status?: string }) =>
+    fetchApi<any>('/knowledge-base', { method: 'POST', body: JSON.stringify(dto) }),
   publishArticle: (id: string) =>
     fetchApi<any>(`/knowledge-base/${id}/publish`, { method: 'PUT' }),
   archiveArticle: (id: string) =>
