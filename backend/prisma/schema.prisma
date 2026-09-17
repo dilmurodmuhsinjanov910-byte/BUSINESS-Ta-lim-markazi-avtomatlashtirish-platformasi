@@ -1,0 +1,416 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  SUPER_ADMIN
+  OWNER
+  ADMIN
+  ACCOUNTANT
+  TEACHER
+  OPERATOR
+}
+
+enum LeadSource {
+  TELEGRAM
+  INSTAGRAM
+  FACEBOOK
+  WALK_IN
+  REFERRAL
+  WEBSITE
+  CALL
+}
+
+enum ScoreTier {
+  HOT
+  WARM
+  COLD
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  TRIAL_BOOKED
+  TRIAL_ATTENDED
+  WON
+  LOST
+}
+
+enum ActivityType {
+  STATUS_CHANGE
+  NOTE
+  CALL
+  MESSAGE
+  SCORE_UPDATE
+  TRIAL_BOOKED
+  SYSTEM
+}
+
+enum GroupStatus {
+  RECRUITING
+  ACTIVE
+  FULL
+  ARCHIVED
+}
+
+enum BookingStatus {
+  BOOKED
+  CONFIRMED
+  ATTENDED
+  MISSED
+  CANCELLED
+  RESCHEDULED
+}
+
+enum ReminderType {
+  BEFORE_24H
+  BEFORE_2H
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum FollowUpStatus {
+  PENDING
+  SENT
+  RESPONDED
+  CANCELLED
+  ESCALATED
+}
+
+enum TaskType {
+  CALL_LEAD
+  FOLLOW_UP
+  CHECK_PAYMENT
+  CONTACT_TRIAL_MISSED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum ConversationStatus {
+  AI_HANDLING
+  NEEDS_HUMAN
+  ADMIN_HANDLING
+  RESOLVED
+}
+
+enum MessageSender {
+  USER
+  AI
+  ADMIN
+  SYSTEM
+}
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  CLICK
+  PAYME
+  UZUM
+  BANK_TRANSFER
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  fullName     String
+  role         Role      @default(ADMIN)
+  phone        String?
+  isActive     Boolean   @default(true)
+  branchId     String?
+  branch       Branch?   @relation(fields: [branchId], references: [id])
+  tasks        Task[]
+  auditLogs    AuditLog[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  legalName String?
+  phone     String?
+  email     String?
+  address   String?
+  branches  Branch[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Branch {
+  id             String         @id @default(cuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  address        String
+  phone          String
+  latitude       Float?
+  longitude      Float?
+  isActive       Boolean        @default(true)
+  groups         Group[]
+  leads          Lead[]
+  trialBookings  TrialBooking[]
+  users          User[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model Course {
+  id                    String   @id @default(cuid())
+  name                  String
+  description           String?
+  language              String
+  level                 String
+  monthlyPrice          Float
+  durationMonths        Int      @default(3)
+  lessonsPerWeek        Int      @default(3)
+  lessonDurationMinutes Int      @default(80)
+  isActive              Boolean  @default(true)
+  groups                Group[]
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model Group {
+  id              String         @id @default(cuid())
+  name            String
+  courseId        String
+  course          Course         @relation(fields: [courseId], references: [id])
+  branchId        String
+  branch          Branch         @relation(fields: [branchId], references: [id])
+  teacherId       String?
+  daysOfWeek      String
+  startTime       String
+  endTime         String
+  roomNumber      String?
+  maxStudents     Int            @default(12)
+  currentStudents Int            @default(0)
+  status          GroupStatus    @default(RECRUITING)
+  trialBookings   TrialBooking[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+model Lead {
+  id                String         @id @default(cuid())
+  fullName          String
+  phone             String
+  telegramId        String?
+  telegramUsername  String?
+  source            LeadSource     @default(TELEGRAM)
+  score             Int            @default(50)
+  scoreTier         ScoreTier      @default(WARM)
+  status            LeadStatus     @default(NEW)
+  lostReason        String?
+  preferredLanguage String?
+  preferredCourse   String?
+  preferredBranchId String?
+  preferredBranch   Branch?        @relation(fields: [preferredBranchId], references: [id])
+  notes             String?
+  activities        LeadActivity[]
+  trialBookings     TrialBooking[]
+  conversations     Conversation[]
+  tasks             Task[]
+  payments          Payment[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([phone])
+  @@index([telegramId])
+}
+
+model LeadActivity {
+  id          String       @id @default(cuid())
+  leadId      String
+  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type        ActivityType
+  title       String
+  description String?
+  metadata    String?
+  createdById String?
+  createdAt   DateTime     @default(now())
+}
+
+model TrialBooking {
+  id                 String        @id @default(cuid())
+  leadId             String
+  lead               Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  groupId            String
+  group              Group         @relation(fields: [groupId], references: [id])
+  branchId           String
+  branch             Branch        @relation(fields: [branchId], references: [id])
+  bookingDate        DateTime
+  timeSlot           String
+  status             BookingStatus @default(BOOKED)
+  attendedAt         DateTime?
+  attendedBy         String?
+  missedReason       String?
+  cancellationReason String?
+  reminders          Reminder[]
+  followUps          FollowUp[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([leadId])
+  @@index([groupId])
+}
+
+model Reminder {
+  id           String         @id @default(cuid())
+  bookingId    String
+  booking      TrialBooking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  leadId       String
+  scheduledAt  DateTime
+  reminderType ReminderType
+  channel      String         @default("TELEGRAM")
+  status       ReminderStatus @default(PENDING)
+  sentAt       DateTime?
+  errorLog     String?
+  createdAt    DateTime       @default(now())
+
+  @@index([status, scheduledAt])
+}
+
+model FollowUp {
+  id          String         @id @default(cuid())
+  bookingId   String
+  booking     TrialBooking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  leadId      String
+  sequence    Int
+  scheduledAt DateTime
+  status      FollowUpStatus @default(PENDING)
+  sentAt      DateTime?
+  messageText String?
+  createdAt   DateTime       @default(now())
+
+  @@index([status, scheduledAt])
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  taskType    TaskType
+  priority    TaskPriority @default(MEDIUM)
+  status      TaskStatus   @default(TODO)
+  assignedToId String?
+  assignedTo  User?        @relation(fields: [assignedToId], references: [id])
+  leadId      String?
+  lead        Lead?        @relation(fields: [leadId], references: [id])
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([status, priority])
+}
+
+model Conversation {
+  id                 String             @id @default(cuid())
+  leadId             String
+  lead               Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  channel            String             @default("TELEGRAM")
+  status             ConversationStatus @default(AI_HANDLING)
+  handoffReason      String?
+  handoffTriggeredAt DateTime?
+  assignedAdminId    String?
+  messages           Message[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([leadId])
+  @@index([status])
+}
+
+model Message {
+  id             String        @id @default(cuid())
+  conversationId String
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderType     MessageSender
+  content        String
+  metadata       String?
+  createdAt      DateTime      @default(now())
+
+  @@index([conversationId])
+}
+
+model KnowledgeBaseArticle {
+  id        String        @id @default(cuid())
+  title     String
+  category  String
+  content   String
+  tags      String?
+  status    ArticleStatus @default(DRAFT)
+  viewCount Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([status, category])
+}
+
+model Payment {
+  id           String        @id @default(cuid())
+  leadId       String
+  lead         Lead          @relation(fields: [leadId], references: [id])
+  amount       Float
+  currency     String        @default("UZS")
+  status       PaymentStatus @default(PENDING)
+  method       PaymentMethod @default(CASH)
+  paidAt       DateTime?
+  recordedById String?
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([leadId])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  entityType  String
+  entityId    String
+  action      String
+  changedById String?
+  changedBy   User?    @relation(fields: [changedById], references: [id])
+  oldValue    String?
+  newValue    String?
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+}
