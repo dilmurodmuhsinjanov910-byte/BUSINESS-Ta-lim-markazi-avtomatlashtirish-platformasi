@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { crmApi, ensureAuthenticated } from "@/lib/api";
+import { translations, Language } from "@/lib/translations";
 import {
   Users,
   CalendarCheck,
@@ -13,6 +14,9 @@ import {
   TrendingUp,
   Flame,
   Sun,
+  Moon,
+  Globe,
+  Check,
   Snowflake,
   UserCheck,
   PhoneCall,
@@ -25,7 +29,6 @@ import {
   ChevronRight,
   UserX,
   Layers,
-  Sparkles,
   GraduationCap,
   Award,
   ClipboardCheck,
@@ -33,6 +36,8 @@ import {
   Receipt,
   Printer,
   Wallet,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 
 export default function AdminPortal() {
@@ -357,6 +362,33 @@ export default function AdminPortal() {
   const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
   const [notifyingDebtorId, setNotifyingDebtorId] = useState<string | null>(null);
 
+  // Portal Mode, Language & Theme
+  const [portalMode, setPortalMode] = useState<"admin" | "teacher">("admin");
+  const [language, setLanguage] = useState<Language>("uz");
+  const t = translations[language];
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  // Teacher Workspace State
+  const [teacherGroups, setTeacherGroups] = useState<any[]>([]);
+  const [selectedTeacherGroupId, setSelectedTeacherGroupId] = useState<string>("");
+  const [teacherSubTab, setTeacherSubTab] = useState<"attendance" | "grades">("attendance");
+  const [teacherAttendanceDate, setTeacherAttendanceDate] = useState<string>(
+    new Date().toISOString().split("T")[0]
+  );
+  const [teacherAttendanceMap, setTeacherAttendanceMap] = useState<
+    Record<string, { status: "PRESENT" | "ABSENT" | "LATE" | "EXCUSED"; notes: string }>
+  >({});
+  const [isSavingTeacherAttendance, setIsSavingTeacherAttendance] = useState(false);
+
+  // Teacher Grade State
+  const [selectedStudentForGrade, setSelectedStudentForGrade] = useState<string>("");
+  const [gradeScore, setGradeScore] = useState<number>(85);
+  const [gradeMaxScore, setGradeMaxScore] = useState<number>(100);
+  const [gradeType, setGradeType] = useState<string>("HOMEWORK");
+  const [gradeTitle, setGradeTitle] = useState<string>("");
+  const [gradeComment, setGradeComment] = useState<string>("");
+  const [isSavingGrade, setIsSavingGrade] = useState(false);
+
   // Load real data from backend (Supports silent auto-polling)
   const refreshData = async (isManual = false) => {
     if (isManual) setIsRefreshing(true);
@@ -377,6 +409,7 @@ export default function AdminPortal() {
         financeData,
         paymentsData,
         debtorsData,
+        teacherData,
       ] = await Promise.allSettled([
         crmApi.getKpis(),
         crmApi.getFunnel(),
@@ -392,6 +425,7 @@ export default function AdminPortal() {
         crmApi.getFinanceSummary(),
         crmApi.getPayments(),
         crmApi.getDebtors(),
+        crmApi.getTeacherPortal(),
       ]);
 
       let anySuccess = false;
@@ -544,12 +578,168 @@ export default function AdminPortal() {
         setDebtors(debtorsData.value);
         anySuccess = true;
       }
+      if (teacherData.status === "fulfilled" && teacherData.value?.groups) {
+        const tGroups = teacherData.value.groups;
+        setTeacherGroups(tGroups);
+        if (tGroups.length > 0) {
+          setSelectedTeacherGroupId((prev) => {
+            if (prev && tGroups.some((g: any) => g.id === prev)) return prev;
+            const withStudents = tGroups.find((g: any) => g.students?.length > 0);
+            return withStudents ? withStudents.id : tGroups[0].id;
+          });
+        }
+        anySuccess = true;
+      }
 
       setIsConnectedToBackend(anySuccess);
     } catch (err) {
       console.warn("Backend sync failed, using cache:", err);
     } finally {
       if (isManual) setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedTheme = (localStorage.getItem("portal_theme") as "light" | "dark") || "light";
+      setTheme(savedTheme);
+      if (savedTheme === "dark") {
+        document.documentElement.classList.add("dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+      }
+
+      const savedLang = (localStorage.getItem("portal_lang") as Language) || "uz";
+      setLanguage(savedLang);
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const nextTheme = theme === "light" ? "dark" : "light";
+    setTheme(nextTheme);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("portal_theme", nextTheme);
+      if (nextTheme === "dark") {
+        document.documentElement.classList.add("dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+      }
+    }
+  };
+
+  const switchLanguage = (lang: Language) => {
+    setLanguage(lang);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("portal_lang", lang);
+    }
+  };
+
+  // Sync teacher attendance map when selected group changes
+  useEffect(() => {
+    const currentGroup = teacherGroups.find((g) => g.id === selectedTeacherGroupId);
+    if (currentGroup && Array.isArray(currentGroup.students)) {
+      setTeacherAttendanceMap((prev) => {
+        const newMap = { ...prev };
+        currentGroup.students.forEach((st: any) => {
+          if (!newMap[st.enrollmentId]) {
+            newMap[st.enrollmentId] = { status: "PRESENT", notes: "" };
+          }
+        });
+        return newMap;
+      });
+      if (currentGroup.students.length > 0 && !selectedStudentForGrade) {
+        setSelectedStudentForGrade(currentGroup.students[0].enrollmentId);
+      }
+    }
+  }, [selectedTeacherGroupId, teacherGroups]);
+
+  const handleMarkAllPresent = () => {
+    const currentGroup = teacherGroups.find((g) => g.id === selectedTeacherGroupId);
+    if (!currentGroup || !currentGroup.students) return;
+    const updated: Record<string, { status: "PRESENT" | "ABSENT" | "LATE" | "EXCUSED"; notes: string }> = {};
+    currentGroup.students.forEach((st: any) => {
+      updated[st.enrollmentId] = {
+        status: "PRESENT",
+        notes: teacherAttendanceMap[st.enrollmentId]?.notes || "",
+      };
+    });
+    setTeacherAttendanceMap(updated);
+  };
+
+  const handleSetStudentStatus = (enrollmentId: string, status: "PRESENT" | "ABSENT" | "LATE" | "EXCUSED") => {
+    setTeacherAttendanceMap((prev) => ({
+      ...prev,
+      [enrollmentId]: {
+        notes: prev[enrollmentId]?.notes || "",
+        status,
+      },
+    }));
+  };
+
+  const handleSaveTeacherAttendance = async () => {
+    if (!selectedTeacherGroupId) return;
+    const currentGroup = teacherGroups.find((g) => g.id === selectedTeacherGroupId);
+    if (!currentGroup || !currentGroup.students || currentGroup.students.length === 0) return;
+
+    setIsSavingTeacherAttendance(true);
+    try {
+      const records = currentGroup.students.map((st: any) => ({
+        enrollmentId: st.enrollmentId,
+        status: teacherAttendanceMap[st.enrollmentId]?.status || "PRESENT",
+        notes: teacherAttendanceMap[st.enrollmentId]?.notes || undefined,
+      }));
+
+      await crmApi.recordAttendance({
+        groupId: selectedTeacherGroupId,
+        date: teacherAttendanceDate,
+        records,
+      });
+
+      alert(
+        language === "uz"
+          ? "✅ Davomat muvaffaqiyatli saqlandi va talabalarga bildirishnoma yuborildi!"
+          : "✅ Посещаемость успешно сохранена и уведомления отправлены!"
+      );
+      await refreshData();
+    } catch (err: any) {
+      alert(
+        (language === "uz" ? "Davomatni saqlashda xatolik: " : "Ошибка сохранения посещаемости: ") +
+          (err.message || err)
+      );
+    } finally {
+      setIsSavingTeacherAttendance(false);
+    }
+  };
+
+  const handleSaveTeacherGrade = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudentForGrade || !gradeTitle) return;
+
+    setIsSavingGrade(true);
+    try {
+      await crmApi.recordGrade({
+        enrollmentId: selectedStudentForGrade,
+        score: Number(gradeScore),
+        maxScore: Number(gradeMaxScore) || 100,
+        gradeType,
+        title: gradeTitle,
+        comment: gradeComment || undefined,
+      });
+
+      setGradeTitle("");
+      setGradeComment("");
+      alert(
+        language === "uz"
+          ? "✅ Baho saqlandi va talabaning Telegram botiga yuborildi!"
+          : "✅ Оценка выставлена и отправлена в Telegram студента!"
+      );
+      await refreshData();
+    } catch (err: any) {
+      alert(
+        (language === "uz" ? "Bahoni saqlashda xato: " : "Ошибка сохранения оценки: ") + (err.message || err)
+      );
+    } finally {
+      setIsSavingGrade(false);
     }
   };
 
@@ -807,312 +997,869 @@ export default function AdminPortal() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden">
+    <div className={`flex h-screen ${theme === "dark" ? "dark" : ""} bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans overflow-hidden transition-colors`}>
       {/* Sidebar Navigation */}
-      <aside className="w-64 bg-slate-900 text-white flex flex-col justify-between p-4 shadow-xl select-none">
+      <aside className="w-64 bg-slate-900 dark:bg-black text-white flex flex-col justify-between p-4 shadow-xl select-none border-r border-slate-800 shrink-0">
         <div>
-          {/* Brand header */}
-          <div className="flex items-center space-x-3 mb-8 px-2">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center shadow-md">
-              <Sparkles className="w-6 h-6 text-white" />
+          {/* Institutional Academic Emblem */}
+          <div className="flex items-center space-x-3 mb-6 px-2">
+            <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700/80 flex items-center justify-center text-slate-100 shadow-xs">
+              <GraduationCap className="w-5 h-5 text-indigo-400" />
             </div>
             <div>
-              <h1 className="font-bold text-lg leading-tight tracking-wide text-white">Al-Xorazmiy</h1>
-              <p className="text-xs text-indigo-400 font-medium tracking-wider uppercase">BUSINESS V1 CRM</p>
+              <h1 className="font-bold text-base leading-tight tracking-wide text-white">{t.brandName}</h1>
+              <p className="text-[11px] text-slate-400 font-medium tracking-wide">{t.brandAcademy}</p>
             </div>
+          </div>
+
+          {/* Mode Switcher inside Sidebar */}
+          <div className="mb-4 bg-slate-800/80 p-1 rounded-xl border border-slate-700/60 flex items-center">
+            <button
+              onClick={() => setPortalMode("admin")}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
+                portalMode === "admin"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>{t.adminMode.split(" ")[0]}</span>
+            </button>
+            <button
+              onClick={() => setPortalMode("teacher")}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
+                portalMode === "teacher"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>{t.teacherMode.split(" ")[0]}</span>
+            </button>
           </div>
 
           {/* Navigation Links */}
           <nav className="space-y-1">
-            <button
-              onClick={() => setActiveTab("dashboard")}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === "dashboard"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <TrendingUp className="w-5 h-5" />
-                <span>Boshqaruv paneli</span>
-              </div>
-            </button>
+            {portalMode === "admin" ? (
+              <>
+                <button
+                  onClick={() => setActiveTab("dashboard")}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    activeTab === "dashboard"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <TrendingUp className="w-4 h-4" />
+                    <span>{t.navDashboard}</span>
+                  </div>
+                </button>
 
-            <button
-              onClick={() => setActiveTab("leads")}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === "leads"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <Users className="w-5 h-5" />
-                <span>Mijozlar (Leads)</span>
-              </div>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-indigo-300 font-semibold">
-                {leads.length}
-              </span>
-            </button>
+                <button
+                  onClick={() => setActiveTab("leads")}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    activeTab === "leads"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <Users className="w-4 h-4" />
+                    <span>{t.navLeads}</span>
+                  </div>
+                  <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-slate-800 text-indigo-300 font-semibold">
+                    {leads.length}
+                  </span>
+                </button>
 
-            <button
-              onClick={() => setActiveTab("trials")}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === "trials"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <CalendarCheck className="w-5 h-5" />
-                <span>Sinov darslari</span>
-              </div>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold">
-                {trials.length}
-              </span>
-            </button>
+                <button
+                  onClick={() => setActiveTab("trials")}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    activeTab === "trials"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <CalendarCheck className="w-4 h-4" />
+                    <span>{t.navTrials}</span>
+                  </div>
+                  <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold">
+                    {trials.length}
+                  </span>
+                </button>
 
-            <button
-              onClick={() => setActiveTab("conversations")}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === "conversations"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <MessageSquare className="w-5 h-5" />
-                <span>Jonli suhbatlar</span>
-              </div>
-              {conversations.some((c) => c.status === "NEEDS_HUMAN") && (
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
-                </span>
-              )}
-            </button>
+                <button
+                  onClick={() => setActiveTab("conversations")}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    activeTab === "conversations"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <MessageSquare className="w-4 h-4" />
+                    <span>{t.navChats}</span>
+                  </div>
+                  {conversations.some((c) => c.status === "NEEDS_HUMAN") && (
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                    </span>
+                  )}
+                </button>
 
-            <button
-              onClick={() => setActiveTab("courses")}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === "courses"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <BookOpen className="w-5 h-5" />
-                <span>Kurslar & Narxlar</span>
-              </div>
-            </button>
+                <button
+                  onClick={() => setActiveTab("courses")}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    activeTab === "courses"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <BookOpen className="w-4 h-4" />
+                    <span>{t.navCourses}</span>
+                  </div>
+                </button>
 
-            <button
-              onClick={() => setActiveTab("kb")}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === "kb"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <FileText className="w-5 h-5" />
-                <span>Bilimlar bazasi (KB)</span>
-              </div>
-            </button>
+                <button
+                  onClick={() => setActiveTab("kb")}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    activeTab === "kb"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <FileText className="w-4 h-4" />
+                    <span>{t.navKb}</span>
+                  </div>
+                </button>
 
-            <button
-              onClick={() => setActiveTab("tasks")}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === "tasks"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <CheckSquare className="w-5 h-5" />
-                <span>Vazifalar & Eskalatsiya</span>
-              </div>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 font-semibold">
-                {tasks.filter((t) => t.status === "TODO").length}
-              </span>
-            </button>
+                <button
+                  onClick={() => setActiveTab("tasks")}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    activeTab === "tasks"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <CheckSquare className="w-4 h-4" />
+                    <span>{t.navTasks}</span>
+                  </div>
+                  <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-300 font-semibold">
+                    {tasks.filter((t) => t.status === "TODO").length}
+                  </span>
+                </button>
 
-            <button
-              onClick={() => setActiveTab("attendance")}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === "attendance"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <GraduationCap className="w-5 h-5" />
-                <span>Davomat & Baholar</span>
-              </div>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold uppercase">
-                Mini App
-              </span>
-            </button>
+                <button
+                  onClick={() => setActiveTab("attendance")}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    activeTab === "attendance"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <GraduationCap className="w-4 h-4" />
+                    <span>{t.navAttendance}</span>
+                  </div>
+                </button>
 
-            <button
-              onClick={() => setActiveTab("finance")}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === "finance"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <CreditCard className="w-5 h-5" />
-                <span>Moliya & To'lovlar</span>
-              </div>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold uppercase">
-                Kassa
-              </span>
-            </button>
+                <button
+                  onClick={() => setActiveTab("finance")}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    activeTab === "finance"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <CreditCard className="w-4 h-4" />
+                    <span>{t.navFinance}</span>
+                  </div>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold uppercase">
+                    Kassa
+                  </span>
+                </button>
 
-            <button
-              onClick={() => setActiveTab("audit")}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === "audit"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-              }`}
-            >
-              <div className="flex items-center space-x-3">
-                <ShieldCheck className="w-5 h-5" />
-                <span>Audit jurnali</span>
-              </div>
-            </button>
+                <button
+                  onClick={() => setActiveTab("audit")}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    activeTab === "audit"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>{t.navAudit}</span>
+                  </div>
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="px-3 py-2 text-[11px] uppercase font-bold text-slate-400 tracking-wider">
+                  {t.teacherDeskTitle}
+                </div>
+                <button
+                  onClick={() => setTeacherSubTab("attendance")}
+                  className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    teacherSubTab === "attendance"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <CalendarCheck className="w-4 h-4" />
+                  <span>{t.attendanceRegister}</span>
+                </button>
+                <button
+                  onClick={() => setTeacherSubTab("grades")}
+                  className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    teacherSubTab === "grades"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <Award className="w-4 h-4" />
+                  <span>{t.gradebook}</span>
+                </button>
+              </>
+            )}
           </nav>
         </div>
 
         {/* User Info footer */}
         <div className="pt-4 border-t border-slate-800">
           <div className="flex items-center space-x-3 px-2">
-            <div className="w-9 h-9 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 font-bold">
-              BA
+            <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 font-bold text-xs">
+              {portalMode === "admin" ? "BA" : "OZ"}
             </div>
             <div className="overflow-hidden">
-              <p className="text-sm font-medium text-white truncate">Bosh Administrator</p>
-              <p className="text-xs text-emerald-400 font-mono">SUPER_ADMIN</p>
+              <p className="text-xs font-semibold text-white truncate">
+                {portalMode === "admin" ? "Bosh Administrator" : "Ustoz O'qituvchi"}
+              </p>
+              <p className="text-[10px] text-slate-400 font-mono">
+                {portalMode === "admin" ? "SUPER_ADMIN" : "TEACHER"}
+              </p>
             </div>
           </div>
         </div>
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col overflow-y-auto bg-slate-50">
+      <main className="flex-1 flex flex-col overflow-y-auto bg-slate-50 dark:bg-slate-950 transition-colors">
         {/* Top bar */}
-        <header className="h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-10 shadow-xs">
-          <div className="flex items-center space-x-2 text-sm text-slate-500">
-            <span>CRM</span>
-            <ChevronRight className="w-4 h-4" />
-            <span className="font-semibold text-slate-800 capitalize">
-              {activeTab === "dashboard" && "Boshqaruv Paneli & Konversiya Funneli"}
-              {activeTab === "leads" && "Mijozlar Boshqaruvi & Ball Tizimi"}
-              {activeTab === "trials" && "Sinov Darslari Rejasi & Joy Cheklovlari"}
-              {activeTab === "conversations" && "AI Jonli Suhbatlar & Operatorga Uzatish"}
-              {activeTab === "courses" && "Kurslar Katalogi & Rasmiy Narxlar"}
-              {activeTab === "kb" && "Bilimlar Bazasi (DRAFT / PUBLISHED)"}
-              {activeTab === "tasks" && "Administrator Vazifalari & Eskalatsiya"}
-              {activeTab === "attendance" && "Davomat & Baholar Jurnali"}
-              {activeTab === "finance" && "Moliya, Kvitansiyalar & Qarzdorlar Boshqaruvi"}
-              {activeTab === "audit" && "Xavfsizlik & Audit Jurnali"}
+        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 flex items-center justify-between sticky top-0 z-10 shadow-xs shrink-0 transition-colors">
+          <div className="flex items-center space-x-2 text-xs text-slate-500 dark:text-slate-400">
+            <span className="font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+              {portalMode === "admin" ? t.adminMode : t.teacherMode}
+            </span>
+            <ChevronRight className="w-3.5 h-3.5" />
+            <span className="font-semibold text-slate-700 dark:text-slate-300 capitalize">
+              {portalMode === "teacher"
+                ? teacherSubTab === "attendance"
+                  ? t.attendanceRegister
+                  : t.gradebook
+                : activeTab === "dashboard"
+                ? t.navDashboard
+                : activeTab === "leads"
+                ? t.navLeads
+                : activeTab === "trials"
+                ? t.navTrials
+                : activeTab === "conversations"
+                ? t.navChats
+                : activeTab === "courses"
+                ? t.navCourses
+                : activeTab === "kb"
+                ? t.navKb
+                : activeTab === "tasks"
+                ? t.navTasks
+                : activeTab === "attendance"
+                ? t.navAttendance
+                : activeTab === "finance"
+                ? t.navFinance
+                : t.navAudit}
             </span>
           </div>
 
           <div className="flex items-center space-x-3">
-            {isConnectedToBackend ? (
-              <div className="flex items-center space-x-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>API Bog'langan (Live)</span>
-              </div>
-            ) : (
-              <div className="flex items-center space-x-1.5 px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-xs font-semibold">
-                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                <span>Lokal Rejim</span>
-              </div>
-            )}
+            {/* Live API status */}
+            <div className="flex items-center space-x-1.5 px-2.5 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>{t.connectedStatus}</span>
+            </div>
+
+            {/* Language Switcher: UZ / RU */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-bold">
+              <button
+                onClick={() => switchLanguage("uz")}
+                className={`px-2 py-1 rounded-md transition-all ${
+                  language === "uz"
+                    ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                }`}
+              >
+                O'zb
+              </button>
+              <button
+                onClick={() => switchLanguage("ru")}
+                className={`px-2 py-1 rounded-md transition-all ${
+                  language === "ru"
+                    ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                }`}
+              >
+                Рус
+              </button>
+            </div>
+
+            {/* Theme Switcher: Tong (Light) / Tun (Dark) */}
+            <button
+              onClick={toggleTheme}
+              title={theme === "light" ? `${t.darkTheme} rejimiga o'tish` : `${t.lightTheme} rejimiga o'tish`}
+              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold transition-colors"
+            >
+              {theme === "light" ? (
+                <>
+                  <Moon className="w-3.5 h-3.5 text-slate-600" />
+                  <span>{t.darkTheme}</span>
+                </>
+              ) : (
+                <>
+                  <Sun className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{t.lightTheme}</span>
+                </>
+              )}
+            </button>
+
+            {/* Refresh */}
             <button
               onClick={() => refreshData(true)}
-              title="Baza bilan qayta yangilash"
-              className="flex items-center space-x-1.5 px-3 py-2 border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold transition-colors shadow-xs"
+              title={t.actionRefresh}
+              className="flex items-center space-x-1.5 px-3 py-1.5 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-semibold transition-colors shadow-xs"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-indigo-600" : ""}`} />
-              <span>Yangilash</span>
+              <span>{t.actionRefresh}</span>
             </button>
-            <button
-              onClick={() => setShowNewLeadModal(true)}
-              className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-md shadow-indigo-600/20 transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Yangi Lead</span>
-            </button>
+
+            {/* Add Lead in Admin mode */}
+            {portalMode === "admin" && (
+              <button
+                onClick={() => setShowNewLeadModal(true)}
+                className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold shadow-xs transition-all"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{t.actionNewLead}</span>
+              </button>
+            )}
           </div>
         </header>
 
-        {/* Dynamic Tab Content */}
-        <div className="p-8">
+        {/* TEACHER MODE WORKSPACE */}
+        {portalMode === "teacher" ? (
+          <div className="p-8 space-y-6">
+            {/* Header / Intro */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="px-2.5 py-1 rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-400 font-bold text-xs">
+                    {t.teacherMode}
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">
+                    {teacherGroups.length} ta faol guruh
+                  </span>
+                </div>
+                <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mt-2">
+                  {t.teacherDeskTitle}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  {t.teacherDeskSubtitle}
+                </p>
+              </div>
+
+              {/* Sub-tab switcher: Attendance vs Grades */}
+              <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 shrink-0">
+                <button
+                  onClick={() => setTeacherSubTab("attendance")}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-2 ${
+                    teacherSubTab === "attendance"
+                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs"
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                >
+                  <CalendarCheck className="w-4 h-4" />
+                  <span>{t.attendanceRegister}</span>
+                </button>
+                <button
+                  onClick={() => setTeacherSubTab("grades")}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-2 ${
+                    teacherSubTab === "grades"
+                      ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs"
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                >
+                  <Award className="w-4 h-4" />
+                  <span>{t.gradebook}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Groups Selection Row */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  {t.myGroups} ({teacherGroups.length})
+                </h3>
+                <span className="text-xs text-slate-400">
+                  Faol dars guruhini tanlang
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {teacherGroups.map((g: any) => {
+                  const isSelected = g.id === selectedTeacherGroupId;
+                  const stCount = g.students?.length || 0;
+                  return (
+                    <button
+                      key={g.id}
+                      onClick={() => {
+                        setSelectedTeacherGroupId(g.id);
+                      }}
+                      className={`text-left p-4 rounded-xl border transition-all ${
+                        isSelected
+                          ? "bg-indigo-50/50 dark:bg-indigo-950/30 border-indigo-500 ring-2 ring-indigo-500/20 shadow-xs"
+                          : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                          {g.name}
+                        </span>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                            stCount > 0
+                              ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                          }`}
+                        >
+                          {stCount} / {g.maxStudents || 12}
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">
+                        {g.courseName || "Kurs"}
+                      </div>
+                      <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                        <span>{g.daysOfWeek || "Dush-Chor-Jum"}</span>
+                        <span>{g.startTime || "14:00"} - {g.endTime || "15:30"}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Sub-view 1: Attendance Register */}
+            {teacherSubTab === "attendance" && (
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+                {/* Top Action Bar */}
+                <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/40">
+                  <div className="flex items-center space-x-3">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">{t.date}:</span>
+                      <input
+                        type="date"
+                        value={teacherAttendanceDate}
+                        onChange={(e) => setTeacherAttendanceDate(e.target.value)}
+                        className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleMarkAllPresent}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 text-xs font-bold hover:bg-emerald-100 transition-colors flex items-center space-x-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{t.allPresent}</span>
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveTeacherAttendance}
+                    disabled={isSavingTeacherAttendance}
+                    className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold shadow-xs transition-colors flex items-center space-x-2"
+                  >
+                    <ClipboardCheck className="w-4 h-4" />
+                    <span>{isSavingTeacherAttendance ? t.saving : t.saveAttendance}</span>
+                  </button>
+                </div>
+
+                {/* Table of Students */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        <th className="py-3 px-4 w-12">#</th>
+                        <th className="py-3 px-4">{t.student}</th>
+                        <th className="py-3 px-4">{t.phone}</th>
+                        <th className="py-3 px-4 text-center">Davomat Holati (1-Tap)</th>
+                        <th className="py-3 px-4">{t.teacherComment}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                      {(() => {
+                        const currentGroup = teacherGroups.find((g) => g.id === selectedTeacherGroupId);
+                        const stList = currentGroup?.students || [];
+                        if (stList.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={5} className="py-8 text-center text-slate-400">
+                                {t.noStudentsInGroup}
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return stList.map((st: any, idx: number) => {
+                          const currentRecord = teacherAttendanceMap[st.enrollmentId] || { status: "PRESENT", notes: "" };
+                          return (
+                            <tr key={st.enrollmentId} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                              <td className="py-3 px-4 font-mono text-slate-400">{idx + 1}</td>
+                              <td className="py-3 px-4">
+                                <div className="font-bold text-slate-900 dark:text-slate-100">{st.fullName}</div>
+                                {st.telegramId && (
+                                  <span className="text-[10px] text-blue-500 font-sans bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 rounded-full border border-blue-200 dark:border-blue-800 inline-block mt-0.5">
+                                    Telegram: @{st.telegramId}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-300">
+                                {st.phone}
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center justify-center space-x-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetStudentStatus(st.enrollmentId, "PRESENT")}
+                                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all border ${
+                                      currentRecord.status === "PRESENT"
+                                        ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
+                                        : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-emerald-50 dark:hover:bg-slate-700"
+                                    }`}
+                                  >
+                                    {t.present}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetStudentStatus(st.enrollmentId, "LATE")}
+                                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all border ${
+                                      currentRecord.status === "LATE"
+                                        ? "bg-amber-500 text-white border-amber-500 shadow-xs"
+                                        : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-slate-700"
+                                    }`}
+                                  >
+                                    {t.late}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetStudentStatus(st.enrollmentId, "EXCUSED")}
+                                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all border ${
+                                      currentRecord.status === "EXCUSED"
+                                        ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                                        : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-slate-700"
+                                    }`}
+                                  >
+                                    {t.excused}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetStudentStatus(st.enrollmentId, "ABSENT")}
+                                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all border ${
+                                      currentRecord.status === "ABSENT"
+                                        ? "bg-rose-600 text-white border-rose-600 shadow-xs"
+                                        : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-rose-50 dark:hover:bg-slate-700"
+                                    }`}
+                                  >
+                                    {t.absent}
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <input
+                                  type="text"
+                                  placeholder={t.teacherComment}
+                                  value={currentRecord.notes}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setTeacherAttendanceMap((prev) => ({
+                                      ...prev,
+                                      [st.enrollmentId]: {
+                                        status: currentRecord.status,
+                                        notes: val,
+                                      },
+                                    }));
+                                  }}
+                                  className="w-full px-2.5 py-1 text-xs border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                />
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Sub-view 2: Gradebook */}
+            {teacherSubTab === "grades" && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Form to submit grade */}
+                <div className="lg:col-span-1 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+                  <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100 mb-1 flex items-center space-x-2">
+                    <Award className="w-4 h-4 text-indigo-600" />
+                    <span>{t.saveGrade}</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mb-4">
+                    Talabaga qo'yilgan baho avtomatik ravishda uning shaxsiy Telegram botiga yuboriladi.
+                  </p>
+
+                  <form onSubmit={handleSaveTeacherGrade} className="space-y-3.5 text-xs">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        {t.student}
+                      </label>
+                      <select
+                        value={selectedStudentForGrade}
+                        onChange={(e) => setSelectedStudentForGrade(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium focus:ring-2 focus:ring-indigo-500"
+                        required
+                      >
+                        <option value="">-- Talabani tanlang --</option>
+                        {(() => {
+                          const currentGroup = teacherGroups.find((g) => g.id === selectedTeacherGroupId);
+                          return (currentGroup?.students || []).map((st: any) => (
+                            <option key={st.enrollmentId} value={st.enrollmentId}>
+                              {st.fullName} ({st.phone})
+                            </option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        {t.gradeType}
+                      </label>
+                      <select
+                        value={gradeType}
+                        onChange={(e) => setGradeType(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="HOMEWORK">📝 {t.homework}</option>
+                        <option value="CLASSWORK">💡 {t.classwork}</option>
+                        <option value="QUIZ">⚡ {t.quiz}</option>
+                        <option value="EXAM">🎓 {t.exam}</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="font-bold text-slate-700 dark:text-slate-300">{t.score}</label>
+                        <div className="flex space-x-1">
+                          {[100, 95, 90, 85, 75].map((s) => (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() => setGradeScore(s)}
+                              className="px-1.5 py-0.5 text-[10px] bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded text-slate-700 dark:text-slate-300 font-mono"
+                            >
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={gradeScore}
+                        onChange={(e) => setGradeScore(Number(e.target.value))}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-sm font-bold text-indigo-600 focus:ring-2 focus:ring-indigo-500"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        {t.assignmentTitle}
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Masalan: Unit 3 Vocabulary & Reading"
+                        value={gradeTitle}
+                        onChange={(e) => setGradeTitle(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        {t.teacherComment}
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Masalan: Grammatikada yaxshi faollik ko'rsatdi"
+                        value={gradeComment}
+                        onChange={(e) => setGradeComment(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSavingGrade || !selectedStudentForGrade || !gradeTitle}
+                      className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold transition-all shadow-xs flex items-center justify-center space-x-1.5"
+                    >
+                      <Award className="w-4 h-4" />
+                      <span>{isSavingGrade ? t.saving : t.saveGrade}</span>
+                    </button>
+                  </form>
+                </div>
+
+                {/* Performance table */}
+                <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+                  <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100 mb-4 flex items-center justify-between">
+                    <span>Guruh O'quvchilari O'zlashtirish Natijalari</span>
+                    <span className="text-xs text-slate-400 font-mono">
+                      Jami: {teacherGroups.find((g) => g.id === selectedTeacherGroupId)?.students?.length || 0} talaba
+                    </span>
+                  </h4>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 uppercase">
+                          <th className="py-2.5 px-3">{t.student}</th>
+                          <th className="py-2.5 px-3">{t.averageScore}</th>
+                          <th className="py-2.5 px-3">{t.recentGrades}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {(() => {
+                          const currentGroup = teacherGroups.find((g) => g.id === selectedTeacherGroupId);
+                          const stList = currentGroup?.students || [];
+                          if (stList.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={3} className="py-6 text-center text-slate-400">
+                                  {t.noStudentsInGroup}
+                                </td>
+                              </tr>
+                            );
+                          }
+                          return stList.map((st: any) => (
+                            <tr key={st.enrollmentId} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                              <td className="py-3 px-3">
+                                <div className="font-bold text-slate-800 dark:text-slate-200">{st.fullName}</div>
+                                <div className="text-[11px] text-slate-400 font-mono">{st.phone}</div>
+                              </td>
+                              <td className="py-3 px-3 font-bold text-amber-600">
+                                {st.averageGrade !== null ? `${st.averageGrade} / 100` : "—"}
+                              </td>
+                              <td className="py-3 px-3">
+                                <div className="flex flex-wrap gap-1">
+                                  {(st.recentGrades || []).length === 0 ? (
+                                    <span className="text-slate-400 text-[11px]">Hozircha baho yo'q</span>
+                                  ) : (
+                                    st.recentGrades.slice(0, 3).map((g: any, gi: number) => (
+                                      <span
+                                        key={gi}
+                                        className="px-2 py-0.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-mono text-[10px] rounded border border-indigo-200 dark:border-indigo-800 font-bold"
+                                      >
+                                        {g.score}
+                                      </span>
+                                    ))
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ));
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Dynamic Tab Content */
+          <div className="p-8">
           {/* DASHBOARD TAB */}
           {activeTab === "dashboard" && (
             <div className="space-y-8">
               {/* KPI Cards Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-slate-500">Jami Leadlar</span>
-                    <span className="p-2 rounded-xl bg-blue-50 text-blue-600">
+                    <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{t.totalLeads}</span>
+                    <span className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400">
                       <Users className="w-5 h-5" />
                     </span>
                   </div>
-                  <div className="text-3xl font-extrabold text-slate-900">{kpis.totalLeads}</div>
-                  <p className="text-xs text-slate-500 mt-2">
-                    <span className="text-emerald-600 font-semibold">+18% </span> o'tgan haftaga nisbatan
+                  <div className="text-3xl font-extrabold text-slate-900 dark:text-white">{kpis.totalLeads}</div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold">+18% </span> {t.vsLastWeek}
                   </p>
                 </div>
 
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-slate-500">Issiq Mijozlar (HOT)</span>
-                    <span className="p-2 rounded-xl bg-orange-50 text-orange-600">
+                    <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{t.hotLeads}</span>
+                    <span className="p-2 rounded-xl bg-orange-50 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400">
                       <Flame className="w-5 h-5" />
                     </span>
                   </div>
-                  <div className="text-3xl font-extrabold text-orange-600">{kpis.hotLeads}</div>
-                  <p className="text-xs text-slate-500 mt-2">Ball &gt;= 70 ball bo'lgan o'quvchilar</p>
+                  <div className="text-3xl font-extrabold text-orange-600 dark:text-orange-400">{kpis.hotLeads}</div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{t.hotSubtitle}</p>
                 </div>
 
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-slate-500">Sinovga Kelish Foizi</span>
-                    <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
+                    <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{t.trialAttendance}</span>
+                    <span className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
                       <UserCheck className="w-5 h-5" />
                     </span>
                   </div>
-                  <div className="text-3xl font-extrabold text-emerald-600">{kpis.trialShowUpRate}%</div>
-                  <p className="text-xs text-slate-500 mt-2">Attended / (Attended + Missed)</p>
+                  <div className="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400">{kpis.trialShowUpRate}%</div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{t.trialSubtitle}</p>
                 </div>
 
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-slate-500">Qabul Qilingan (WON)</span>
-                    <span className="p-2 rounded-xl bg-purple-50 text-purple-600">
-                      <Sparkles className="w-5 h-5" />
+                    <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{t.enrolledWon}</span>
+                    <span className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
+                      <Award className="w-5 h-5" />
                     </span>
                   </div>
-                  <div className="text-3xl font-extrabold text-purple-600">{kpis.wonLeads}</div>
-                  <p className="text-xs text-slate-500 mt-2">Konversiya darajasi: {kpis.conversionRate}%</p>
+                  <div className="text-3xl font-extrabold text-purple-600 dark:text-purple-400">{kpis.wonLeads}</div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{t.conversionRateLabel}: {kpis.conversionRate}%</p>
                 </div>
               </div>
 
               {/* Visual Conversion Funnel */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h2 className="text-lg font-bold text-slate-900">Mijozlarni Qabul Qilish Funneli (Conversion Funnel)</h2>
-                    <p className="text-sm text-slate-500">
-                      Yangi murojaatdan rasmiy to'lov qabul qilib guruhga joylashgacha bo'lgan bosqichlar
+                    <h2 className="text-lg font-bold text-slate-900 dark:text-white">{t.conversionFunnel}</h2>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      {t.funnelSubtitle}
                     </p>
                   </div>
                 </div>
@@ -1121,12 +1868,12 @@ export default function AdminPortal() {
                   {funnel.map((item, index) => (
                     <div key={index} className="space-y-1.5">
                       <div className="flex justify-between text-sm font-medium">
-                        <span className="text-slate-700">{item.stage}</span>
-                        <span className="text-slate-900 font-bold">
+                        <span className="text-slate-700 dark:text-slate-300">{item.stage}</span>
+                        <span className="text-slate-900 dark:text-white font-bold">
                           {item.count} ta ({item.pct}%)
                         </span>
                       </div>
-                      <div className="h-4 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-4 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                         <div
                           className={`h-full ${item.color} rounded-full transition-all duration-700`}
                           style={{ width: `${item.pct}%` }}
@@ -2386,6 +3133,7 @@ export default function AdminPortal() {
             </div>
           )}
         </div>
+      )}
       </main>
 
       {/* Modal: Add New Lead */}
