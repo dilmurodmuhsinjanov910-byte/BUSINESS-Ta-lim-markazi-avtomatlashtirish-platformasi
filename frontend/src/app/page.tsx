@@ -899,6 +899,7 @@ export default function AdminPortal() {
               {activeTab === "courses" && "Kurslar Katalogi & Rasmiy Narxlar"}
               {activeTab === "kb" && "Bilimlar Bazasi (DRAFT / PUBLISHED)"}
               {activeTab === "tasks" && "Administrator Vazifalari & Eskalatsiya"}
+              {activeTab === "attendance" && "Davomat & Baholar Jurnali"}
               {activeTab === "audit" && "Xavfsizlik & Audit Jurnali"}
             </span>
           </div>

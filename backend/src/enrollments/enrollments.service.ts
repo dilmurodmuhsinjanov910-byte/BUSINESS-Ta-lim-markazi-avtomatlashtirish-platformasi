@@ -15,6 +15,10 @@ export class EnrollmentsService {
     private configService: ConfigService,
   ) {}
 
+  async create(dto: CreateEnrollmentDto, createdById?: string) {
+    return this.createEnrollment(dto, createdById);
+  }
+
   async createEnrollment(dto: CreateEnrollmentDto, createdById?: string) {
     const lead = await this.prisma.lead.findUnique({
       where: { id: dto.leadId },
@@ -34,11 +38,25 @@ export class EnrollmentsService {
       throw new NotFoundException(`Guruh topilmadi (ID: ${dto.groupId})`);
     }
 
-    // Check group capacity
-    if (group.currentStudents >= group.maxStudents) {
-      throw new BadRequestException(
-        `Guruh to'lgan. Maksimal o'quvchilar soni: ${group.maxStudents}, hozirda: ${group.currentStudents}`,
-      );
+    // Check group capacity (strict limit enforcement)
+    const capacity = (group as any).capacity !== undefined ? (group as any).capacity : (group.maxStudents ?? 12);
+    let activeEnrollmentCount = typeof group.currentStudents === 'number' ? group.currentStudents : 0;
+    if (this.prisma.enrollment?.count) {
+      const dbCount = await this.prisma.enrollment.count({
+        where: {
+          groupId: dto.groupId,
+          status: EnrollmentStatus.ACTIVE,
+        },
+      });
+      if (typeof dbCount === 'number' && !isNaN(dbCount)) {
+        activeEnrollmentCount = dbCount;
+      }
+    }
+
+    const groupStudents = typeof group.currentStudents === 'number' ? group.currentStudents : 0;
+    const currentCount = Math.max(activeEnrollmentCount, groupStudents);
+    if (currentCount >= capacity || group.status === 'FULL') {
+      throw new BadRequestException("Guruh sig'imi to'lgan");
     }
 
     // Check existing active enrollment
@@ -53,10 +71,36 @@ export class EnrollmentsService {
       throw new BadRequestException("Ushbu o'quvchi bu guruhga allaqachon biriktirilgan");
     }
 
-    const monthlyFee = dto.monthlyFee ?? group.course.monthlyPrice;
+    const monthlyFee = dto.monthlyFee ?? group.course?.monthlyPrice ?? 0;
 
     // Database transaction: create enrollment, increment currentStudents, mark lead WON, create activity
     const enrollment = await this.prisma.$transaction(async (tx) => {
+      // Concurrency safeguard: re-verify capacity inside atomic transaction
+      const txGroup = await tx.group.findUnique({
+        where: { id: group.id },
+      });
+      if (!txGroup) {
+        throw new NotFoundException(`Guruh topilmadi (ID: ${group.id})`);
+      }
+      const txCapacity = (txGroup as any).capacity !== undefined ? (txGroup as any).capacity : (txGroup.maxStudents ?? 12);
+      let txActiveCount = typeof txGroup.currentStudents === 'number' ? txGroup.currentStudents : 0;
+      if (tx.enrollment?.count) {
+        const txDbCount = await tx.enrollment.count({
+          where: {
+            groupId: group.id,
+            status: EnrollmentStatus.ACTIVE,
+          },
+        });
+        if (typeof txDbCount === 'number' && !isNaN(txDbCount)) {
+          txActiveCount = txDbCount;
+        }
+      }
+      const txGroupStudents = typeof txGroup.currentStudents === 'number' ? txGroup.currentStudents : 0;
+      const txCurrentCount = Math.max(txActiveCount, txGroupStudents);
+      if (txCurrentCount >= txCapacity || txGroup.status === 'FULL') {
+        throw new BadRequestException("Guruh sig'imi to'lgan");
+      }
+
       const newEnrollment = await tx.enrollment.create({
         data: {
           leadId: dto.leadId,
@@ -75,12 +119,12 @@ export class EnrollmentsService {
         },
       });
 
-      const updatedCount = group.currentStudents + 1;
+      const updatedCount = txCurrentCount + 1;
       await tx.group.update({
         where: { id: group.id },
         data: {
           currentStudents: updatedCount,
-          status: updatedCount >= group.maxStudents ? 'FULL' : group.status,
+          status: updatedCount >= txCapacity ? 'FULL' : txGroup.status,
         },
       });
 
@@ -249,6 +293,25 @@ export class EnrollmentsService {
           ? Math.round(grades.reduce((sum, g) => sum + g.score, 0) / grades.length)
           : null;
 
+      // Sanitize attendances to avoid leaking internal staff IDs (markedById)
+      const sanitizedAttendances = attendances.map((a) => ({
+        id: a.id,
+        date: a.date,
+        status: a.status,
+        notes: a.notes,
+      }));
+
+      // Sanitize grades to avoid leaking internal staff IDs (markedById)
+      const sanitizedGrades = grades.map((g) => ({
+        id: g.id,
+        score: g.score,
+        maxScore: g.maxScore,
+        gradeType: g.gradeType,
+        title: g.title,
+        comment: g.comment,
+        date: g.date,
+      }));
+
       return {
         id: enr.id,
         status: enr.status,
@@ -285,22 +348,39 @@ export class EnrollmentsService {
           averageGrade,
           totalGradesCount: grades.length,
         },
-        attendances,
-        grades,
+        attendances: sanitizedAttendances,
+        grades: sanitizedGrades,
       };
     });
+
+    // Sanitize student PII: mask phone number to protect student privacy against scraping
+    const maskedPhone = lead.phone
+      ? lead.phone.length > 7
+        ? `${lead.phone.slice(0, 5)}****${lead.phone.slice(-3)}`
+        : lead.phone
+      : null;
+
+    // Sanitize payments: omit internal staff notes, recordedById, and internal DB timestamps
+    const sanitizedPayments = (lead.payments || []).map((p) => ({
+      id: p.id,
+      amount: p.amount,
+      currency: p.currency || 'UZS',
+      status: p.status,
+      method: p.method,
+      createdAt: p.createdAt,
+    }));
 
     return {
       student: {
         id: lead.id,
         fullName: lead.fullName,
-        phone: lead.phone,
+        phone: maskedPhone,
         telegramId: lead.telegramId,
         telegramUsername: lead.telegramUsername,
         age: lead.age,
       },
       enrollments: processedEnrollments,
-      payments: lead.payments,
+      payments: sanitizedPayments,
     };
   }
 

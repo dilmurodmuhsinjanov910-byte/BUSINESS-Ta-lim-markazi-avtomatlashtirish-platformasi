@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecordGradeDto } from './dto/record-grade.dto';
 
@@ -17,6 +17,13 @@ export class GradesService {
 
     if (!enrollment) {
       throw new NotFoundException(`Biriktirilgan o'quvchi topilmadi (ID: ${dto.enrollmentId})`);
+    }
+
+    const enrollmentGroupId = enrollment.groupId || (enrollment as any).group?.id;
+    if (dto.groupId && enrollmentGroupId && enrollmentGroupId !== dto.groupId) {
+      throw new BadRequestException(
+        `Biriktirilgan o'quvchi (ID: ${dto.enrollmentId}) ko'rsatilgan guruhga (ID: ${dto.groupId}) tegishli emas`,
+      );
     }
 
     const grade = await this.prisma.studentGrade.create({

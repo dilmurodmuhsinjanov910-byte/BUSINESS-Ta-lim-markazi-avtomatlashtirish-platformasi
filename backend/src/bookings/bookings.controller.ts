@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Body, Param, Query, UseGuards, Request, ForbiddenException } from '@nestjs/common';
 import { BookingsService, CreateBookingDto } from './bookings.service';
+import { RateLimit } from '../common/guards/rate-limit.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { BookingStatus, Role } from '@prisma/client';
 
@@ -44,6 +45,7 @@ export class BookingsController {
   }
 
   @Post()
+  @RateLimit(15, 60)
   async createBooking(@Body() dto: CreateBookingDto, @Request() req: any) {
     return this.bookingsService.createBooking(dto, req.user?.id);
   }

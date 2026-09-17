@@ -6,6 +6,10 @@ export class RecordGradeDto {
   @IsString()
   enrollmentId: string;
 
+  @IsOptional()
+  @IsString()
+  groupId?: string;
+
   @IsNotEmpty()
   @IsNumber()
   @Min(0)

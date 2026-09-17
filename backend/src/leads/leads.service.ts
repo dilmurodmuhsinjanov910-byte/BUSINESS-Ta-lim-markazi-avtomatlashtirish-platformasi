@@ -2,19 +2,9 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { LeadStatus, LeadSource, ScoreTier, ActivityType } from '@prisma/client';
 
-export interface CreateOrUpdateLeadDto {
-  fullName: string;
-  phone?: string;
-  age?: number;
-  telegramId?: string;
-  telegramUsername?: string;
-  source?: LeadSource;
-  preferredLanguage?: string;
-  preferredCourse?: string;
-  preferredBranchId?: string;
-  notes?: string;
-  initialScoreDelta?: number;
-}
+import { CreateOrUpdateLeadDto } from './dto/create-or-update-lead.dto';
+
+export { CreateOrUpdateLeadDto };
 
 @Injectable()
 export class LeadsService {

@@ -1,18 +1,25 @@
-import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { EnrollmentsService } from './enrollments.service';
 import { CreateEnrollmentDto } from './dto/create-enrollment.dto';
-import { EnrollmentStatus } from '@prisma/client';
+import { EnrollmentStatus, Role } from '@prisma/client';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 @Controller('enrollments')
 export class EnrollmentsController {
   constructor(private readonly enrollmentsService: EnrollmentsService) {}
 
   @Post()
-  async createEnrollment(@Body() dto: CreateEnrollmentDto) {
-    return this.enrollmentsService.createEnrollment(dto);
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.OPERATOR, Role.OWNER)
+  async createEnrollment(@Body() dto: CreateEnrollmentDto, @Request() req?: any) {
+    return this.enrollmentsService.create(dto, req?.user?.id);
   }
 
   @Get()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.OPERATOR, Role.TEACHER, Role.OWNER)
   async getAllEnrollments(
     @Query('groupId') groupId?: string,
     @Query('status') status?: EnrollmentStatus,
@@ -26,12 +33,20 @@ export class EnrollmentsController {
   }
 
   @Get('teacher')
-  async getTeacherPortalData(@Query('teacherId') teacherId?: string) {
-    return this.enrollmentsService.getTeacherPortalData(teacherId);
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN, Role.OWNER)
+  async getTeacherPortalData(@Query('teacherId') teacherId?: string, @Request() req?: any) {
+    const effectiveTeacherId = (req?.user?.role === Role.TEACHER && !teacherId)
+      ? req.user.id
+      : teacherId;
+    return this.enrollmentsService.getTeacherPortalData(effectiveTeacherId);
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.OPERATOR, Role.TEACHER, Role.OWNER)
   async getEnrollmentById(@Param('id') id: string) {
     return this.enrollmentsService.getEnrollmentById(id);
   }
 }
+
