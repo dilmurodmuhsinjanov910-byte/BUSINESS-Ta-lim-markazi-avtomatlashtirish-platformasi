@@ -11,6 +11,13 @@ export function getAuthToken(): string | null {
   return cachedToken;
 }
 
+export function clearAuthToken() {
+  cachedToken = null;
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('crm_auth_token');
+  }
+}
+
 export function setAuthToken(token: string) {
   cachedToken = token;
   if (typeof window !== 'undefined') {
@@ -18,38 +25,59 @@ export function setAuthToken(token: string) {
   }
 }
 
-export async function ensureAuthenticated(): Promise<string> {
-  const existing = getAuthToken();
-  if (existing) return existing;
+let authRefreshPromise: Promise<string> | null = null;
 
-  try {
-    const res = await fetch(`${API_BASE_URL}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: 'admin@education.uz',
-        password: 'AdminPassword123!',
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setAuthToken(data.accessToken);
-      return data.accessToken;
-    }
-  } catch (e) {
-    console.warn('Auto login failed or backend offline:', e);
+export async function ensureAuthenticated(forceRefresh = false): Promise<string> {
+  if (forceRefresh) {
+    clearAuthToken();
+  } else {
+    const existing = getAuthToken();
+    if (existing) return existing;
   }
-  return '';
+
+  // Deduplicate concurrent re-authentication calls
+  if (authRefreshPromise) {
+    return authRefreshPromise;
+  }
+
+  authRefreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'admin@education.uz',
+          password: 'AdminPassword123!',
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.accessToken) {
+          setAuthToken(data.accessToken);
+          return data.accessToken;
+        }
+      }
+      clearAuthToken();
+    } catch (e) {
+      console.warn('Auto login failed or backend offline:', e);
+      clearAuthToken();
+    } finally {
+      authRefreshPromise = null;
+    }
+    return '';
+  })();
+
+  return authRefreshPromise;
 }
 
-export async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+export async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const token = getAuthToken();
   const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(options?.headers as Record<string, string>),
+    ...((options?.headers as Record<string, string>) || {}),
   };
 
   const res = await fetch(url, {
@@ -57,24 +85,37 @@ export async function fetchApi<T>(endpoint: string, options?: RequestInit): Prom
     headers,
   });
 
-  // If 401 Unauthorized, try re-authenticating once
-  if (res.status === 401 && !(options?.headers as any)?.['X-Retry']) {
-    const newToken = await ensureAuthenticated();
+  // If 401 Unauthorized, clear stale/invalid token and retry cleanly once
+  const isRetry = Boolean(headers['X-Retry'] || (options?.headers as any)?.['X-Retry']);
+  if (res.status === 401 && !isRetry) {
+    clearAuthToken();
+    const newToken = await ensureAuthenticated(true);
     if (newToken) {
-      headers.Authorization = `Bearer ${newToken}`;
-      headers['X-Retry'] = 'true';
-      const retryRes = await fetch(url, { ...options, headers });
+      const retryHeaders: Record<string, string> = {
+        ...headers,
+        Authorization: `Bearer ${newToken}`,
+        'X-Retry': 'true',
+      };
+      const retryRes = await fetch(url, { ...options, headers: retryHeaders });
       if (retryRes.ok) return retryRes.json();
+      if (retryRes.status === 401) {
+        clearAuthToken();
+      }
     }
   }
 
   if (!res.ok) {
+    if (res.status === 401) {
+      clearAuthToken();
+    }
     const errorBody = await res.json().catch(() => ({ message: res.statusText }));
     throw new Error(errorBody.message || 'API so\'rovida xatolik yuz berdi');
   }
 
   return res.json();
 }
+
+export const fetchApi = apiRequest;
 
 export const crmApi = {
   // Analytics
