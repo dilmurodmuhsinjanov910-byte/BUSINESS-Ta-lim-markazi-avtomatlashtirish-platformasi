@@ -4,15 +4,15 @@
  *
  * Verifies:
  * 1. Admin Portal (http://localhost:3000) - all 9 sections render cleanly:
- *    - KPI & Funnel (Dashboard)
- *    - Clients table (Leads)
- *    - Trial lessons calendar (Trials)
- *    - Live chat takeover (Conversations)
- *    - Courses & Groups
- *    - Knowledge base CRUD (KB)
- *    - Tasks & Escalation
- *    - Attendance & Grades journal (breadcrumb: "Davomat & Baholar Jurnali")
- *    - Audit log
+ *    - 1. KPI & Funnel (Dashboard)
+ *    - 2. Clients table (Leads)
+ *    - 3. Trial lessons calendar (Trials)
+ *    - 4. Live chat takeover (Conversations)
+ *    - 5. Courses & Groups
+ *    - 6. Knowledge base CRUD (KB)
+ *    - 7. Tasks & Escalation
+ *    - 8. Attendance & Grades journal (breadcrumb: "Davomat & Baholar Jurnali")
+ *    - 9. Audit log
  * 2. Student Telegram Mini App (http://localhost:3000/student):
  *    - Course details, timetable, attendance % calculation, per-lesson status, teacher grades, payment status
  * 3. Teacher Telegram Mini App (http://localhost:3000/teacher):
@@ -143,13 +143,13 @@ async function runE2ETests() {
       const adminPage = await browser.newPage();
       await adminPage.setViewport({ width: 1440, height: 900 });
 
-      // Track unhandled console errors and runtime exceptions (ignore missing favicon.ico)
+      // Track unhandled console errors and runtime exceptions (ignoring missing favicon.ico)
       const adminErrors = [];
       adminPage.on('pageerror', err => adminErrors.push(`[PageError] ${err.message}`));
       adminPage.on('console', msg => {
         if (msg.type() === 'error') {
           const text = msg.text();
-          if (!text.includes('favicon.ico') && !text.includes('Failed to load resource: the server responded with a status of 404')) {
+          if (!text.includes('favicon.ico') && !text.includes('status of 404')) {
             adminErrors.push(`[ConsoleError] ${text}`);
           }
         }
@@ -445,6 +445,12 @@ async function runE2ETests() {
       const teacherPage = await browser.newPage();
       await teacherPage.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
 
+      // Handle any native alerts automatically
+      teacherPage.on('dialog', async (dialog) => {
+        console.log(`  [Dialog] ${dialog.type()}: ${dialog.message()}`);
+        await dialog.dismiss();
+      });
+
       // Inject auth token for teacher page
       await teacherPage.evaluateOnNewDocument((token) => {
         localStorage.setItem('crm_auth_token', token);
@@ -498,8 +504,7 @@ async function runE2ETests() {
       const testAttendanceNote = `E2E Live Attendance Note ${testTimestamp}`;
 
       // Mark student as LATE to reveal note input, then enter note
-      await teacherPage.evaluate((note) => {
-        // Click 1-tap "Kech" (LATE) button
+      await teacherPage.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button'));
         const lateBtn = buttons.find(b => b.innerText.trim() === 'Kech');
         if (lateBtn) lateBtn.click();
@@ -509,6 +514,8 @@ async function runE2ETests() {
       await teacherPage.evaluate((note) => {
         const noteInput = document.querySelector('input[placeholder*="Sabab"]');
         if (noteInput) {
+          const tracker = noteInput._valueTracker;
+          if (tracker) tracker.setValue('');
           noteInput.value = note;
           noteInput.dispatchEvent(new Event('input', { bubbles: true }));
           noteInput.dispatchEvent(new Event('change', { bubbles: true }));
@@ -546,40 +553,61 @@ async function runE2ETests() {
       const testScore = 98;
       const testGradeComment = 'Ajoyib natija va a\'lo darajada topshirildi';
 
-      // Fill grading form
-      await teacherPage.evaluate(({ title, score, comment }) => {
-        // Select student in dropdown
-        const studentSelect = document.querySelector('select');
-        if (studentSelect && studentSelect.options.length > 1) {
-          studentSelect.selectedIndex = 1;
-          studentSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      // Select student in dropdown with React-friendly value dispatch
+      const selectedStudentVal = await teacherPage.evaluate(() => {
+        const select = document.querySelector('select');
+        if (select && select.options.length > 1) {
+          const val = select.options[1].value;
+          select.value = val;
+          const tracker = select._valueTracker;
+          if (tracker) tracker.setValue('');
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          return val;
         }
+        return null;
+      });
 
-        // Fill score
+      // Also call puppeteer native select if available
+      if (selectedStudentVal) {
+        await teacherPage.select('select', selectedStudentVal);
+      }
+
+      // Fill score
+      await teacherPage.evaluate((score) => {
         const scoreInput = document.querySelector('input[type="number"]');
         if (scoreInput) {
+          const tracker = scoreInput._valueTracker;
+          if (tracker) tracker.setValue('');
           scoreInput.value = score;
           scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
           scoreInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
+      }, testScore);
 
-        // Fill title
+      // Fill title
+      await teacherPage.evaluate((title) => {
         const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
         const titleInput = inputs.find(i => i.placeholder?.includes('mavzusi') || i.placeholder?.includes('Unit'));
         if (titleInput) {
+          const tracker = titleInput._valueTracker;
+          if (tracker) tracker.setValue('');
           titleInput.value = title;
           titleInput.dispatchEvent(new Event('input', { bubbles: true }));
           titleInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
+      }, testGradeTitle);
 
-        // Fill comment
+      // Fill comment
+      await teacherPage.evaluate((comment) => {
         const commentTextarea = document.querySelector('textarea');
         if (commentTextarea) {
+          const tracker = commentTextarea._valueTracker;
+          if (tracker) tracker.setValue('');
           commentTextarea.value = comment;
           commentTextarea.dispatchEvent(new Event('input', { bubbles: true }));
           commentTextarea.dispatchEvent(new Event('change', { bubbles: true }));
         }
-      }, { title: testGradeTitle, score: testScore, comment: testGradeComment });
+      }, testGradeComment);
 
       // Click submit button: "Bahoni Saqlash & Talaba Kabinetiga Chiqarish"
       await teacherPage.evaluate(() => {
@@ -609,7 +637,7 @@ async function runE2ETests() {
       });
       await new Promise(r => setTimeout(r, 400));
 
-      // Trigger instant refresh button in header or wait for 5s auto-polling
+      // Trigger instant refresh button in header
       await adminPage.evaluate(() => {
         const refreshBtns = Array.from(document.querySelectorAll('header button, main button'));
         const refreshBtn = refreshBtns.find(b => b.innerText.includes('Yangilash'));
