@@ -56,8 +56,21 @@ async function testBotAndAdminFlow() {
     const contactReply = await contactRes.json();
     console.log('   -> Botning kontakt qabul javobi:', contactReply.reply?.slice(0, 80) + '...\n');
 
+    // 3.1. User provides Student Name and Age
+    console.log('3.1. Foydalanuvchi o\'quvchi ismi va yoshini kiritmoqda ("Jasur Aliyev, 16 yosh")...');
+    const nameAgeRes = await fetch(`${BACKEND_URL}/telegram/simulate-name-age`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        telegramId: randomTgId,
+        text: 'Jasur Aliyev, 16 yosh',
+      }),
+    });
+    const nameAgeData = await nameAgeRes.json();
+    console.log(`   -> [TASDIQLANDI]: O'quvchi ma'lumotlari parslendi: Ism: "${nameAgeData.parsed?.fullName}", Yosh: ${nameAgeData.parsed?.age}\n`);
+
     // 4. Verify data arrived in Admin Panel Leads CRM
-    console.log('4. Admin Panelda yangi lead kelganligini tekshirish...');
+    console.log('4. Admin Panelda yangi lead va uning yoshi aks etganini tekshirish...');
     const leadsRes = await fetch(`${FRONTEND_URL}/leads?search=${testPhone}`, {
       headers: { Authorization: `Bearer ${adminToken}` },
     });
@@ -67,7 +80,7 @@ async function testBotAndAdminFlow() {
     if (!createdLead) {
       throw new Error(`Xato: Bot orqali kelgan foydalanuvchi (${testPhone}) admin panelda ko'rinmadi!`);
     }
-    console.log(`   -> [TASDIQLANDI]: Lead CRM-da mavjud! ID: ${createdLead.id}, Ball: ${createdLead.score} (${createdLead.scoreTier})\n`);
+    console.log(`   -> [TASDIQLANDI]: Lead CRM-da mavjud! Ism: "${createdLead.fullName}", Yoshi: ${createdLead.age} yosh, Ball: ${createdLead.score} (${createdLead.scoreTier})\n`);
 
     // 5. User asks for Operator / Human handoff
     console.log('5. Foydalanuvchi botda operatorni so\'ramoqda...');

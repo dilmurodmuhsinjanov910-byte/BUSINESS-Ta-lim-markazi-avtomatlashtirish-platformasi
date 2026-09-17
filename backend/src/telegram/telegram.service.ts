@@ -4,12 +4,41 @@ import { Telegraf, Markup } from 'telegraf';
 import { LeadsService } from '../leads/leads.service';
 import { AiService } from '../ai/ai.service';
 import { ConversationsService } from '../conversations/conversations.service';
-import { LeadSource, LeadStatus } from '@prisma/client';
+import { LeadSource, LeadStatus, MessageSender } from '@prisma/client';
+
+export function parseNameAndAge(text: string, fallbackName = 'Foydalanuvchi'): { fullName: string; age?: number } {
+  const clean = text.trim();
+  let age: number | undefined = undefined;
+
+  // Extract 1-2 digit number representing age (typically 4 to 90)
+  const ageMatch = clean.match(/(?:^|\D)(\d{1,2})(?:\s*yosh|\s*da|\b)/i);
+  if (ageMatch) {
+    const num = parseInt(ageMatch[1], 10);
+    if (num >= 4 && num <= 90) {
+      age = num;
+    }
+  }
+
+  // Remove age and trailing suffixes
+  let name = clean
+    .replace(/(?:^|\D)\d{1,2}(?:\s*yosh(?:da)?|\s*da|\b)/gi, ' ')
+    .replace(/[,;.\-_/\\()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // If after removing numbers no name remains, keep fallback
+  if (!name || name.length < 2) {
+    name = fallbackName;
+  }
+
+  return { fullName: name, age };
+}
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private bot: Telegraf | null = null;
+  private userStates = new Map<string, { step: 'AWAITING_NAME_AND_AGE'; leadId: string; convId: string }>();
 
   constructor(
     private configService: ConfigService,
@@ -29,6 +58,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     try {
       this.bot = new Telegraf(token);
       this.setupHandlers();
+
+      // Register dispatcher for direct Admin -> Telegram replies
+      this.conversationsService.registerTelegramDispatcher(async (telegramId, content) => {
+        return this.sendMessageToTelegramUser(telegramId, content);
+      });
+
       this.bot.launch().catch((err: any) => {
         this.logger.error('Telegram bot ishida xato:', err.message);
       });
@@ -55,7 +90,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const username = from.username;
 
       // Upsert lead using telegramId without fake phone placeholder
-      await this.leadsService.upsertLead({
+      const { lead } = await this.leadsService.upsertLead({
         fullName,
         telegramId,
         telegramUsername: username,
@@ -63,11 +98,26 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         notes: 'Telegram bot orqali /start bosildi',
       });
 
+      const conv = await this.conversationsService.findOrCreateForLead(lead.id, 'TELEGRAM');
+
+      // Save /start and welcome in conversation messages
+      await this.conversationsService.addMessage({
+        conversationId: conv.id,
+        senderType: MessageSender.USER,
+        content: '/start',
+      });
+
       const welcomeText =
         `Assalomu alaykum, ${fullName}!\n\n` +
         `"Al-Xorazmiy" o'quv markazining rasmiy botiga xush kelibsiz!\n` +
         `Biz sizga sifatli ta'lim, malakali ustozlar va eng qulay sharoitlarni taklif qilamiz.\n\n` +
         `To'liq ma'lumot olish va bepul darsga yozilish uchun quyidagi tugmalardan foydalaning:`;
+
+      await this.conversationsService.addMessage({
+        conversationId: conv.id,
+        senderType: MessageSender.AI,
+        content: welcomeText,
+      });
 
       const keyboard = Markup.keyboard([
         [Markup.button.contactRequest('📱 Telefon raqamni ulashish')],
@@ -163,20 +213,39 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
 
     await this.leadsService.updateStatus(lead.id, LeadStatus.QUALIFIED, undefined, 'system-telegram');
+    const conv = await this.conversationsService.findOrCreateForLead(lead.id, 'TELEGRAM');
 
     const cleanPhone = phone.startsWith('+') ? phone : `+${phone}`;
+
+    // Add contact sharing user message to conversation history
+    await this.conversationsService.addMessage({
+      conversationId: conv.id,
+      senderType: MessageSender.USER,
+      content: `📱 Telefon raqam ulashildi: ${cleanPhone}`,
+    });
+
     const reply =
-      `Rahmat, ${fullName}! Telefon raqamingiz (${cleanPhone}) muvaffaqiyatli saqlandi.\n\n` +
-      `Sizni qaysi kursimiz ko'proq qiziqtiradi?\n` +
-      `Quyidagi tugmalardan birini tanlang yoki savolingizni yozing:`;
+      `Rahmat! Telefon raqamingiz (${cleanPhone}) muvaffaqiyatli saqlandi.\n\n` +
+      `📋 **Iltimos, o'quvchining to'liq ismi-familiyasi va yoshini kiriting:**\n` +
+      `(Masalan: *Jasur Aliyev, 16 yosh* yoki *Madina 14*)`;
 
-    const keyboard = Markup.keyboard([
-      ['General English', 'IELTS Intensive'],
-      ['Rus tili', '🎁 Bepul sinov darsiga yozilish'],
-      ['❓ Savollaringiz bormi?', '📞 Operator bilan bog\'lanish'],
-    ]).resize();
+    // Save prompt to conversation history
+    await this.conversationsService.addMessage({
+      conversationId: conv.id,
+      senderType: MessageSender.AI,
+      content: reply,
+    });
 
-    return { lead, reply, keyboard };
+    // Set conversational state to await name and age
+    this.userStates.set(telegramId, {
+      step: 'AWAITING_NAME_AND_AGE',
+      leadId: lead.id,
+      convId: conv.id,
+    });
+
+    const keyboard = Markup.removeKeyboard();
+
+    return { lead, reply, keyboard, conversationId: conv.id };
   }
 
   // Trial request handling
@@ -237,7 +306,56 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const telegramId = String(from.id);
       const username = from.username;
 
-      // Upsert lead
+      // Check if user is in AWAITING_NAME_AND_AGE state
+      const state = this.userStates.get(telegramId);
+      if (state && state.step === 'AWAITING_NAME_AND_AGE') {
+        const parsed = parseNameAndAge(userText, fullName);
+
+        // Update lead with real student name and age
+        const { lead } = await this.leadsService.upsertLead({
+          fullName: parsed.fullName,
+          age: parsed.age,
+          telegramId,
+          notes: parsed.age ? `O'quvchi yoshi: ${parsed.age}` : undefined,
+        });
+
+        // Add user message to conversation history
+        await this.conversationsService.addMessage({
+          conversationId: state.convId,
+          senderType: MessageSender.USER,
+          content: userText,
+        });
+
+        // Clear state
+        this.userStates.delete(telegramId);
+
+        const confirmReply =
+          `✅ **Ma'lumotlaringiz muvaffaqiyatli saqlandi!**\n\n` +
+          `👤 **O'quvchi:** ${parsed.fullName}\n` +
+          (parsed.age ? `🎂 **Yoshi:** ${parsed.age} yosh\n\n` : '\n') +
+          `Sizni qaysi kursimiz ko'proq qiziqtiradi?\n` +
+          `Quyidagi tugmalardan birini tanlang yoki savolingizni bemalol yozing:`;
+
+        // Save AI reply in conversation history
+        await this.conversationsService.addMessage({
+          conversationId: state.convId,
+          senderType: MessageSender.AI,
+          content: confirmReply,
+        });
+
+        const keyboard = Markup.keyboard([
+          ['General English', 'IELTS Intensive'],
+          ['Rus tili', '🎁 Bepul sinov darsiga yozilish'],
+          ['❓ Savollaringiz bormi?', '📞 Operator bilan bog\'lanish'],
+        ]).resize();
+
+        await ctx.reply(confirmReply, { parse_mode: 'Markdown', ...keyboard }).catch(async () => {
+          await ctx.reply(confirmReply, keyboard);
+        });
+        return;
+      }
+
+      // Normal flow: Upsert lead
       const { lead } = await this.leadsService.upsertLead({
         fullName,
         telegramId,
@@ -263,6 +381,22 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  // Send message directly to Telegram user from Admin
+  async sendMessageToTelegramUser(telegramId: string, text: string) {
+    if (this.bot) {
+      try {
+        await this.bot.telegram.sendMessage(telegramId, `👤 **Administrator:**\n${text}`, { parse_mode: 'Markdown' }).catch(async () => {
+          await this.bot!.telegram.sendMessage(telegramId, `Administrator:\n${text}`);
+        });
+        return true;
+      } catch (err: any) {
+        this.logger.error(`Telegramga xabar yuborishda xato [${telegramId}]: ${err.message}`);
+        return false;
+      }
+    }
+    return false;
+  }
+
   // Simulated telegram dispatch for testing or webhook
   async simulateIncomingMessage(telegramId: string, fullName: string, text: string) {
     const { lead } = await this.leadsService.upsertLead({
@@ -279,6 +413,40 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   async simulateContactShared(telegramId: string, phone: string, fullName: string) {
     return this.handleContactShared(telegramId, phone, fullName);
+  }
+
+  async simulateNameAndAgeInput(telegramId: string, text: string) {
+    const state = this.userStates.get(telegramId);
+    const parsed = parseNameAndAge(text);
+
+    const { lead } = await this.leadsService.upsertLead({
+      fullName: parsed.fullName,
+      age: parsed.age,
+      telegramId,
+      notes: parsed.age ? `O'quvchi yoshi: ${parsed.age}` : undefined,
+    });
+
+    if (state?.convId) {
+      await this.conversationsService.addMessage({
+        conversationId: state.convId,
+        senderType: MessageSender.USER,
+        content: text,
+      });
+
+      const confirmReply =
+        `✅ Ma'lumotlar saqlandi: ${parsed.fullName}` +
+        (parsed.age ? `, ${parsed.age} yosh` : '');
+
+      await this.conversationsService.addMessage({
+        conversationId: state.convId,
+        senderType: MessageSender.AI,
+        content: confirmReply,
+      });
+
+      this.userStates.delete(telegramId);
+    }
+
+    return { lead, parsed };
   }
 
   async simulateOperatorRequest(telegramId: string, fullName: string) {

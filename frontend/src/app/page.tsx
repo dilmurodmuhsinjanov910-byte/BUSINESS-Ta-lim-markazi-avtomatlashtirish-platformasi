@@ -351,6 +351,7 @@ export default function AdminPortal() {
             id: l.id,
             fullName: l.fullName,
             phone: l.phone,
+            age: l.age,
             source: l.source,
             score: l.score,
             scoreTier: l.scoreTier,
@@ -384,6 +385,7 @@ export default function AdminPortal() {
           id: c.id,
           leadName: c.lead?.fullName || "Foydalanuvchi",
           phone: c.lead?.phone || "",
+          age: c.lead?.age,
           status: c.status,
           handoffReason: c.handoffReason,
           lastMessage: c.messages?.[c.messages.length - 1]?.content || "Xabar yo'q",
@@ -555,6 +557,18 @@ export default function AdminPortal() {
       };
       setSelectedConv(updatedConv);
       setConversations(conversations.map((c) => (c.id === updatedConv.id ? updatedConv : c)));
+    }
+  };
+
+  const handleTakeOver = async () => {
+    try {
+      await crmApi.takeOverConversation(selectedConv.id);
+      await refreshData();
+    } catch (err: any) {
+      console.warn("API takeOver failed, local fallback:", err.message);
+      const updated = { ...selectedConv, status: "ADMIN_HANDLING" };
+      setSelectedConv(updated);
+      setConversations(conversations.map((c) => (c.id === updated.id ? updated : c)));
     }
   };
 
@@ -947,7 +961,14 @@ export default function AdminPortal() {
                     {filteredLeads.map((lead) => (
                       <tr key={lead.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-4 px-6 font-semibold text-slate-900">
-                          {lead.fullName}
+                          <div className="flex items-center space-x-2">
+                            <span>{lead.fullName}</span>
+                            {(lead as any).age && (
+                              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                🎂 {(lead as any).age} yosh
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs text-slate-400 font-normal">{lead.createdAt}</div>
                         </td>
                         <td className="py-4 px-6">
@@ -1006,11 +1027,19 @@ export default function AdminPortal() {
                         <td className="py-4 px-6 text-right space-x-2">
                           <button
                             onClick={() => {
-                              alert(`Lead ${lead.fullName} ning to'liq faollik tarixi:\n- Manba: ${lead.source}\n- Ball: ${lead.score}\n- Hozirgi status: ${lead.status}`);
+                              const foundConv = conversations.find(
+                                (c) => c.phone === lead.phone || c.leadName === lead.fullName
+                              );
+                              if (foundConv) {
+                                setSelectedConv(foundConv);
+                              }
+                              setActiveTab("conversations");
                             }}
-                            className="text-indigo-600 hover:text-indigo-800 font-semibold text-xs"
+                            className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors shadow-xs"
+                            title="Telegram yozishmalarini to'liq ko'rish va qabul qilish"
                           >
-                            Tarixni ko'rish
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>Suhbatni ko'rish</span>
                           </button>
                         </td>
                       </tr>
@@ -1167,19 +1196,22 @@ export default function AdminPortal() {
                 {/* Header */}
                 <div className="h-16 border-b border-slate-200 bg-white px-6 flex items-center justify-between">
                   <div>
-                    <h3 className="font-bold text-slate-900">{selectedConv.leadName}</h3>
+                    <div className="flex items-center space-x-2">
+                      <h3 className="font-bold text-slate-900">{selectedConv.leadName}</h3>
+                      {(selectedConv as any).age && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          🎂 {(selectedConv as any).age} yosh
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-500">{selectedConv.phone} | Kanal: Telegram</p>
                   </div>
 
                   <div className="flex items-center space-x-3">
                     {selectedConv.status === "NEEDS_HUMAN" && (
                       <button
-                        onClick={() => {
-                          const updated = { ...selectedConv, status: "ADMIN_HANDLING" };
-                          setSelectedConv(updated);
-                          setConversations(conversations.map((c) => (c.id === updated.id ? updated : c)));
-                        }}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+                        onClick={handleTakeOver}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-colors"
                       >
                         Suhbatni qabul qilish (Takeover)
                       </button>

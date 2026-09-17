@@ -100,8 +100,7 @@ export class ConversationsService {
       include: {
         lead: true,
         messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
+          orderBy: { createdAt: 'asc' },
         },
       },
       orderBy: [{ updatedAt: 'desc' }],
@@ -222,6 +221,12 @@ export class ConversationsService {
     });
   }
 
+  private onAdminMessageCallback?: (telegramId: string, content: string) => Promise<any>;
+
+  registerTelegramDispatcher(fn: (telegramId: string, content: string) => Promise<any>) {
+    this.onAdminMessageCallback = fn;
+  }
+
   async addMessage(dto: SendMessageDto) {
     const conv = await this.findOne(dto.conversationId);
 
@@ -231,6 +236,11 @@ export class ConversationsService {
       if (trigger.needsHandoff) {
         await this.triggerHandoff(conv.id, trigger.reason!);
       }
+    }
+
+    // If admin is replying, dispatch directly to user's Telegram if available
+    if (dto.senderType === MessageSender.ADMIN && conv.lead?.telegramId && this.onAdminMessageCallback) {
+      await this.onAdminMessageCallback(conv.lead.telegramId, dto.content).catch(() => {});
     }
 
     const message = await this.prisma.message.create({

@@ -19,4 +19,9 @@ export class TelegramController {
   async simulateOperator(@Body() body: { telegramId: string; fullName: string }) {
     return this.telegramService.simulateOperatorRequest(body.telegramId, body.fullName);
   }
+
+  @Post('simulate-name-age')
+  async simulateNameAge(@Body() body: { telegramId: string; text: string }) {
+    return this.telegramService.simulateNameAndAgeInput(body.telegramId, body.text);
+  }
 }
