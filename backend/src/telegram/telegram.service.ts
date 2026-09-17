@@ -72,7 +72,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const keyboard = Markup.keyboard([
         [Markup.button.contactRequest('📱 Telefon raqamni ulashish')],
         ['📚 Kurslar va narxlar', '📍 Filiallarimiz'],
-        ['🎁 Bepul sinov darsiga yozilish', '📞 Operator bilan bog\'lanish'],
+        ['🎁 Bepul sinov darsiga yozilish', '❓ Savollaringiz bormi?'],
+        ['📞 Operator bilan bog\'lanish'],
       ]).resize();
 
       await ctx.reply(welcomeText, keyboard);
@@ -104,6 +105,36 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const fullName = [from.first_name, from.last_name].filter(Boolean).join(' ') || 'Foydalanuvchi';
       const result = await this.handleTrialRequest(String(from.id), fullName);
       await ctx.reply(result.reply, { parse_mode: 'Markdown' });
+    });
+
+    this.bot.hears('❓ Savollaringiz bormi?', async (ctx) => {
+      const faqText =
+        `❓ *Savollaringiz bormi? Bemalol so'rang!*\n\n` +
+        `Bizning aqlli yordamchimiz o'quv markazimiz bo'yicha har qanday savolingizga darhol javob beradi.\n\n` +
+        `📌 *Quyidagi mavzularda bemalol savol berishingiz mumkin:*\n` +
+        `• 📚 Kurslar narxlari va to'lov usullari (Payme, Click, naqd)\n` +
+        `• ⏰ Dars jadvali (ertalabki, tushki, kechki guruhlar)\n` +
+        `• 📍 Filiallarimiz manzillari va mo'ljallari\n` +
+        `• 🎁 Bepul sinov darsiga yozilish qoidalari\n` +
+        `• 👨‍🏫 O'qituvchilar malakasi va sertifikatlari\n` +
+        `• 💰 Chegirmalar va maxsus aksiyalar\n\n` +
+        `💡 *Savolingizni shunchaki pastdagi xabar yozish maydoniga yozib yuboring!*\n` +
+        `Masalan: *"General English narxi qancha?"* yoki *"Chilonzor filiali qayerda joylashgan?"*`;
+      await ctx.reply(faqText, { parse_mode: 'Markdown' }).catch(async () => {
+        await ctx.reply(faqText);
+      });
+    });
+
+    this.bot.hears('General English', async (ctx) => {
+      await this.handleUserText(ctx, "General English kursi narxi va darslari haqida ma'lumot bering");
+    });
+
+    this.bot.hears('IELTS Intensive', async (ctx) => {
+      await this.handleUserText(ctx, "IELTS Intensive kursi narxi va darslari haqida ma'lumot bering");
+    });
+
+    this.bot.hears('Rus tili', async (ctx) => {
+      await this.handleUserText(ctx, "Rus tili kursi narxi va darslari haqida ma'lumot bering");
     });
 
     this.bot.hears('📞 Operator bilan bog\'lanish', async (ctx) => {
@@ -142,7 +173,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const keyboard = Markup.keyboard([
       ['General English', 'IELTS Intensive'],
       ['Rus tili', '🎁 Bepul sinov darsiga yozilish'],
-      ['📞 Operator bilan bog\'lanish'],
+      ['❓ Savollaringiz bormi?', '📞 Operator bilan bog\'lanish'],
     ]).resize();
 
     return { lead, reply, keyboard };
