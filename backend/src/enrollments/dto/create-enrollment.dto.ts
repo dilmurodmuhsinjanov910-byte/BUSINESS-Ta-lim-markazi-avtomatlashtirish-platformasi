@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsNumber, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsNumber, IsString, Min } from 'class-validator';
 
 export class CreateEnrollmentDto {
   @IsNotEmpty()
@@ -11,5 +11,6 @@ export class CreateEnrollmentDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(0)
   monthlyFee?: number;
 }

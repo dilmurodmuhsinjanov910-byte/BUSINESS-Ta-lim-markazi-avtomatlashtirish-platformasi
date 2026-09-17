@@ -249,6 +249,25 @@ export class EnrollmentsService {
           ? Math.round(grades.reduce((sum, g) => sum + g.score, 0) / grades.length)
           : null;
 
+      // Sanitize attendances to avoid leaking internal staff IDs (markedById)
+      const sanitizedAttendances = attendances.map((a) => ({
+        id: a.id,
+        date: a.date,
+        status: a.status,
+        notes: a.notes,
+      }));
+
+      // Sanitize grades to avoid leaking internal staff IDs (markedById)
+      const sanitizedGrades = grades.map((g) => ({
+        id: g.id,
+        score: g.score,
+        maxScore: g.maxScore,
+        gradeType: g.gradeType,
+        title: g.title,
+        comment: g.comment,
+        date: g.date,
+      }));
+
       return {
         id: enr.id,
         status: enr.status,
@@ -285,22 +304,39 @@ export class EnrollmentsService {
           averageGrade,
           totalGradesCount: grades.length,
         },
-        attendances,
-        grades,
+        attendances: sanitizedAttendances,
+        grades: sanitizedGrades,
       };
     });
+
+    // Sanitize student PII: mask phone number to protect student privacy against scraping
+    const maskedPhone = lead.phone
+      ? lead.phone.length > 7
+        ? `${lead.phone.slice(0, 5)}****${lead.phone.slice(-3)}`
+        : lead.phone
+      : null;
+
+    // Sanitize payments: omit internal staff notes, recordedById, and internal DB timestamps
+    const sanitizedPayments = (lead.payments || []).map((p) => ({
+      id: p.id,
+      amount: p.amount,
+      currency: p.currency || 'UZS',
+      status: p.status,
+      method: p.method,
+      createdAt: p.createdAt,
+    }));
 
     return {
       student: {
         id: lead.id,
         fullName: lead.fullName,
-        phone: lead.phone,
+        phone: maskedPhone,
         telegramId: lead.telegramId,
         telegramUsername: lead.telegramUsername,
         age: lead.age,
       },
       enrollments: processedEnrollments,
-      payments: lead.payments,
+      payments: sanitizedPayments,
     };
   }
 

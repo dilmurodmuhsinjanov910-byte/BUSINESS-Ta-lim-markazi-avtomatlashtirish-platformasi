@@ -224,11 +224,79 @@ describe('Enrollment, Attendance & Grades Suite', () => {
       expect(enr.stats.averageGrade).toBe(85);
       expect(enr.stats.attendancePercentage).toBeGreaterThan(0);
     });
+
+    it('should sanitize student portal data masking phone and stripping internal staff and payment notes', async () => {
+      mockPrisma.lead.findFirst.mockResolvedValue({
+        id: 'lead-sensitive',
+        fullName: 'Botir Zokirov',
+        phone: '+998901234567',
+        telegramId: '87654321',
+        payments: [
+          {
+            id: 'pay-1',
+            amount: 500000,
+            currency: 'UZS',
+            status: 'PAID',
+            method: 'CLICK',
+            recordedById: 'staff-admin-id-secret',
+            notes: 'Internal discount granted by director',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+        enrollments: [
+          {
+            id: 'enr-1',
+            status: 'ACTIVE',
+            monthlyFee: 500000,
+            enrolledAt: new Date(),
+            group: {
+              id: 'group-1',
+              name: 'IELTS-1',
+              daysOfWeek: 'Dush-Chor-Jum',
+              startTime: '16:00',
+              endTime: '17:30',
+              course: { name: 'IELTS', level: 'B2', language: 'Eng', monthlyPrice: 500000 },
+              branch: { name: 'Chilonzor', address: 'Qatortol', phone: '+998712001122' },
+            },
+            attendances: [
+              { id: 'att-1', status: 'PRESENT', date: new Date(), markedById: 'staff-teacher-id' },
+            ],
+            grades: [
+              { id: 'grd-1', score: 88, maxScore: 100, title: 'Essay 1', markedById: 'staff-teacher-id' },
+            ],
+          },
+        ],
+      });
+
+      const portal = await enrollmentsService.getStudentPortalData('87654321');
+      // Phone is masked
+      expect(portal.student.phone).toBe('+9989****567');
+      // Payments strip internal staff notes and recordedById
+      expect(portal.payments[0]).toEqual(
+        expect.objectContaining({
+          id: 'pay-1',
+          amount: 500000,
+          status: 'PAID',
+          method: 'CLICK',
+        }),
+      );
+      expect((portal.payments[0] as any).recordedById).toBeUndefined();
+      expect((portal.payments[0] as any).notes).toBeUndefined();
+      // Attendance strips markedById
+      expect((portal.enrollments[0].attendances[0] as any).markedById).toBeUndefined();
+      // Grade strips markedById
+      expect((portal.enrollments[0].grades[0] as any).markedById).toBeUndefined();
+    });
   });
 
   describe('AttendanceService', () => {
     it('should create attendance records and update if already exists on same date', async () => {
       mockPrisma.group.findUnique.mockResolvedValue({ id: 'group-1', name: 'ENG-A1' });
+      mockPrisma.enrollment.findUnique.mockResolvedValue({
+        id: 'enr-1',
+        groupId: 'group-1',
+      });
 
       // First call finds no existing record -> creates
       mockPrisma.attendance.findFirst.mockResolvedValueOnce(null);
@@ -270,12 +338,42 @@ describe('Enrollment, Attendance & Grades Suite', () => {
       expect(updatedResult.savedCount).toBe(1);
       expect(mockPrisma.attendance.update).toHaveBeenCalled();
     });
+
+    it('should reject attendance record if enrollment does not belong to group (IDOR defense)', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({ id: 'group-1', name: 'ENG-A1' });
+      mockPrisma.enrollment.findUnique.mockResolvedValue({
+        id: 'enr-diff',
+        groupId: 'group-other',
+      });
+
+      await expect(
+        attendanceService.recordAttendance({
+          groupId: 'group-1',
+          date: '2026-09-17',
+          records: [{ enrollmentId: 'enr-diff', status: AttendanceStatus.PRESENT }],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject attendance record if enrollment is not found', async () => {
+      mockPrisma.group.findUnique.mockResolvedValue({ id: 'group-1', name: 'ENG-A1' });
+      mockPrisma.enrollment.findUnique.mockResolvedValue(null);
+
+      await expect(
+        attendanceService.recordAttendance({
+          groupId: 'group-1',
+          date: '2026-09-17',
+          records: [{ enrollmentId: 'enr-nonexistent', status: AttendanceStatus.PRESENT }],
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
   });
 
   describe('GradesService', () => {
     it('should create grade for student enrollment', async () => {
       mockPrisma.enrollment.findUnique.mockResolvedValue({
         id: 'enr-1',
+        groupId: 'group-1',
         lead: { id: 'lead-1', fullName: 'Ali Valiyev' },
         group: { id: 'group-1', course: { name: 'General English' } },
       });
@@ -299,6 +397,24 @@ describe('Enrollment, Attendance & Grades Suite', () => {
       expect(grade.id).toBe('grd-1');
       expect(grade.score).toBe(95);
       expect(mockPrisma.studentGrade.create).toHaveBeenCalled();
+    });
+
+    it('should reject grade record if groupId does not match enrollment groupId (IDOR defense)', async () => {
+      mockPrisma.enrollment.findUnique.mockResolvedValue({
+        id: 'enr-1',
+        groupId: 'group-1',
+        lead: { id: 'lead-1', fullName: 'Ali Valiyev' },
+        group: { id: 'group-1', course: { name: 'General English' } },
+      });
+
+      await expect(
+        gradesService.recordGrade({
+          enrollmentId: 'enr-1',
+          groupId: 'group-wrong',
+          score: 90,
+          title: 'Quiz 2',
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

@@ -12,6 +12,7 @@ export class AiController {
   }
 
   @Post('tool-call')
+  @UseGuards(JwtAuthGuard)
   async executeTool(@Body() body: { toolName: string; args?: any }) {
     return this.aiService.executeTool(body.toolName, body.args || {});
   }

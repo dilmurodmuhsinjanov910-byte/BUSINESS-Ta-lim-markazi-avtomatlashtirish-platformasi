@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecordAttendanceDto } from './dto/record-attendance.dto';
 
@@ -23,6 +23,20 @@ export class AttendanceService {
     const results: any[] = [];
 
     for (const item of dto.records) {
+      // IDOR Verification: Ensure enrollment exists and belongs to target group
+      const enrollment = await this.prisma.enrollment.findUnique({
+        where: { id: item.enrollmentId },
+      });
+      if (!enrollment) {
+        throw new NotFoundException(`Biriktirilgan o'quvchi topilmadi (ID: ${item.enrollmentId})`);
+      }
+      const enrollmentGroupId = enrollment.groupId || (enrollment as any).group?.id;
+      if (enrollmentGroupId && enrollmentGroupId !== dto.groupId) {
+        throw new BadRequestException(
+          `Biriktirilgan o'quvchi (ID: ${item.enrollmentId}) ushbu guruhga (ID: ${dto.groupId}) tegishli emas`,
+        );
+      }
+
       // Find if an attendance record already exists for this enrollment on this date
       const existing = await this.prisma.attendance.findFirst({
         where: {
