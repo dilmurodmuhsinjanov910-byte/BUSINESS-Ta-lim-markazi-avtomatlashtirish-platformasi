@@ -18,6 +18,7 @@
     "prisma:seed": "ts-node prisma/seed.ts",
     "test": "jest --runInBand",
     "test:live": "ts-node test-e2e-full.ts",
+    "test:bot-sync": "ts-node test-bot-admin-flow.ts",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand"
