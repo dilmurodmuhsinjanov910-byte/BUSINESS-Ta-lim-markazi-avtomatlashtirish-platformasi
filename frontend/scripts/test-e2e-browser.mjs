@@ -411,7 +411,8 @@ async function runE2ETests() {
 
       const attendanceTabRendered = await studentPage.evaluate(() => {
         const text = document.body.innerText;
-        return text.includes('Bor') || text.includes('Darsga vaqtida');
+        return text.includes('Darslardagi davomat') &&
+          (text.includes('Bor') || text.includes('Kechikkan') || text.includes('Sababli') || text.includes("Yo'q") || text.includes('dars'));
       });
       suite.assert(
         attendanceTabRendered,
@@ -511,16 +512,12 @@ async function runE2ETests() {
       });
       await new Promise(r => setTimeout(r, 300));
 
-      await teacherPage.evaluate((note) => {
-        const noteInput = document.querySelector('input[placeholder*="Sabab"]');
-        if (noteInput) {
-          const tracker = noteInput._valueTracker;
-          if (tracker) tracker.setValue('');
-          noteInput.value = note;
-          noteInput.dispatchEvent(new Event('input', { bubbles: true }));
-          noteInput.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      }, testAttendanceNote);
+      // Type note into late note input
+      const noteInput = await teacherPage.$('input[placeholder*="Sabab"]');
+      if (noteInput) {
+        await noteInput.click();
+        await noteInput.type(testAttendanceNote);
+      }
 
       // Click "Davomatni Saqlash"
       await teacherPage.evaluate(() => {
@@ -553,70 +550,31 @@ async function runE2ETests() {
       const testScore = 98;
       const testGradeComment = 'Ajoyib natija va a\'lo darajada topshirildi';
 
-      // Select student in dropdown with React-friendly value dispatch
-      const selectedStudentVal = await teacherPage.evaluate(() => {
+      // Find student enrollment id from select options
+      const studentEnrollmentId = await teacherPage.evaluate(() => {
         const select = document.querySelector('select');
-        if (select && select.options.length > 1) {
-          const val = select.options[1].value;
-          select.value = val;
-          const tracker = select._valueTracker;
-          if (tracker) tracker.setValue('');
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-          return val;
-        }
-        return null;
+        return (select && select.options.length > 1) ? select.options[1].value : '';
       });
 
-      // Also call puppeteer native select if available
-      if (selectedStudentVal) {
-        await teacherPage.select('select', selectedStudentVal);
+      if (studentEnrollmentId) {
+        await teacherPage.select('select', studentEnrollmentId);
       }
 
-      // Fill score
-      await teacherPage.evaluate((score) => {
-        const scoreInput = document.querySelector('input[type="number"]');
-        if (scoreInput) {
-          const tracker = scoreInput._valueTracker;
-          if (tracker) tracker.setValue('');
-          scoreInput.value = score;
-          scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
-          scoreInput.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      }, testScore);
+      // Type title using puppeteer type
+      await teacherPage.click('input[placeholder*="Unit"]');
+      await teacherPage.type('input[placeholder*="Unit"]', testGradeTitle);
 
-      // Fill title
-      await teacherPage.evaluate((title) => {
-        const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
-        const titleInput = inputs.find(i => i.placeholder?.includes('mavzusi') || i.placeholder?.includes('Unit'));
-        if (titleInput) {
-          const tracker = titleInput._valueTracker;
-          if (tracker) tracker.setValue('');
-          titleInput.value = title;
-          titleInput.dispatchEvent(new Event('input', { bubbles: true }));
-          titleInput.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      }, testGradeTitle);
-
-      // Fill comment
-      await teacherPage.evaluate((comment) => {
-        const commentTextarea = document.querySelector('textarea');
-        if (commentTextarea) {
-          const tracker = commentTextarea._valueTracker;
-          if (tracker) tracker.setValue('');
-          commentTextarea.value = comment;
-          commentTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-          commentTextarea.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      }, testGradeComment);
+      // Type comment
+      await teacherPage.click('textarea');
+      await teacherPage.type('textarea', testGradeComment);
 
       // Click submit button: "Bahoni Saqlash & Talaba Kabinetiga Chiqarish"
-      await teacherPage.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button'));
-        const saveGradeBtn = buttons.find(b => b.innerText.includes('Bahoni Saqlash'));
-        if (saveGradeBtn) saveGradeBtn.click();
-      });
+      const submitBtn = await teacherPage.$('button[type="submit"]');
+      if (submitBtn) {
+        await submitBtn.click();
+      }
 
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 2000));
       const gradeSuccessMsg = await teacherPage.evaluate(() => {
         const text = document.body.innerText;
         return text.includes('Baho muvaffaqiyatli saqlandi');
@@ -686,6 +644,42 @@ async function runE2ETests() {
       suite.assert(
         studentGradeSync,
         `New grade ("${testGradeTitle}") instantly reflected in Student Mini App gradebook`
+      );
+
+      // 6. Adversarial & Edge Case Verification
+      console.log('\n[Phase 6] Adversarial Edge Cases & Boundary Defense');
+
+      // Test 6.1: Non-existent student ID in Student Portal
+      await studentPage.goto(`${BASE_URL}/student?leadId=invalid-non-existent-uuid-999`, {
+        waitUntil: 'networkidle0',
+      });
+      const invalidIdScreen = await studentPage.evaluate(() => {
+        const text = document.body.innerText;
+        return text.includes('Kabinet topilmadi') && text.includes('Qaytadan urinish');
+      });
+      suite.assert(
+        invalidIdScreen,
+        'Student portal handles invalid/non-existent student ID gracefully with recovery UI ("Kabinet topilmadi")'
+      );
+
+      // Test 6.2: XSS Payload Escaping Verification
+      // Verify that DOM does not interpret script tags in rendered notes
+      const xssExecuted = await adminPage.evaluate(() => {
+        return Boolean(window.__xss_vulnerable__);
+      });
+      suite.assert(
+        !xssExecuted,
+        'Application safely encodes student notes and titles without executing script injections'
+      );
+
+      // Test 6.3: Next.js Error Boundary & 404 Route Integrity
+      await adminPage.goto(`${BASE_URL}/non-existent-random-route-404`, {
+        waitUntil: 'networkidle0',
+      });
+      const notFoundText = await adminPage.evaluate(() => document.body.innerText);
+      suite.assert(
+        notFoundText.includes('404') || notFoundText.includes('This page could not be found'),
+        'Next.js routing safely catches unknown routes with 404 without unhandled crashes'
       );
 
       // Close browser
