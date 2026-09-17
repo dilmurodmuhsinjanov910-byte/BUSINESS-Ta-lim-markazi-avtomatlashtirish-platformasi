@@ -1,4 +1,4 @@
-﻿// Uzbek suffixes to strip for root/stem matching
+// Uzbek suffixes to strip for root/stem matching
 const UZBEK_SUFFIXES = [
   'larimizga', 'larimizda', 'larimizdan', 'larimizni', 'larimiz',
   'lariga', 'larida', 'laridan', 'larini', 'laringiz', 'laring', 'lari',
@@ -101,8 +101,10 @@ export function calculateTokenSimilarity(str1: string, str2: string): number {
   for (const w1 of wordsToCompare1) {
     const isMatch = wordsToCompare2.some((w2) => {
       if (w1 === w2) return true;
-      if (w1.length >= 4 && w2.length >= 4) {
-        if (w1.startsWith(w2.slice(0, 4)) || w2.startsWith(w1.slice(0, 4))) return true;
+      const minLen = Math.min(w1.length, w2.length);
+      const maxLen = Math.max(w1.length, w2.length);
+      if (minLen >= 5 && minLen / maxLen >= 0.75) {
+        if (w1.startsWith(w2.slice(0, minLen - 1)) || w2.startsWith(w1.slice(0, minLen - 1))) return true;
       }
       return false;
     });

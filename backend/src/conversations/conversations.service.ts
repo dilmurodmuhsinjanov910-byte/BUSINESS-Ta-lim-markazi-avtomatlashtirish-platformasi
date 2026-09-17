@@ -168,19 +168,46 @@ export class ConversationsService {
       },
     });
 
+    // Record system audit log
+    if (this.prisma.auditLog?.create) {
+      await this.prisma.auditLog.create({
+        data: {
+          entityType: 'Conversation',
+          entityId: conversationId,
+          action: 'HANDOFF_TRIGGERED',
+          reason: `Operatorga yo'naltirildi: ${reason}`,
+        },
+      }).catch(() => {});
+    }
+
     return updated;
   }
 
   async takeOver(conversationId: string, adminId: string) {
     await this.findOne(conversationId);
 
-    return this.prisma.conversation.update({
+    const updated = await this.prisma.conversation.update({
       where: { id: conversationId },
       data: {
         status: ConversationStatus.ADMIN_HANDLING,
         assignedAdminId: adminId,
       },
     });
+
+    // Record system audit log
+    if (this.prisma.auditLog?.create) {
+      await this.prisma.auditLog.create({
+        data: {
+          entityType: 'Conversation',
+          entityId: conversationId,
+          action: 'ADMIN_TAKEOVER',
+          changedById: adminId,
+          reason: 'Admin suhbatni qo\'lda o\'z zimmasiga oldi',
+        },
+      }).catch(() => {});
+    }
+
+    return updated;
   }
 
   async resolve(conversationId: string, resumeAi = false) {

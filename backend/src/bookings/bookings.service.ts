@@ -172,6 +172,22 @@ export class BookingsService {
     // 6. Schedule Automated Reminders: 24h before and 2h before
     await this.scheduleRemindersForBooking(booking.id, lead.id, bookingDate);
 
+    // Record system audit log
+    if (this.prisma.auditLog?.create) {
+      try {
+        await this.prisma.auditLog.create({
+          data: {
+            entityType: 'TrialBooking',
+            entityId: booking.id,
+            action: 'CREATE_BOOKING',
+            changedById: createdById,
+            newValue: JSON.stringify({ leadId: dto.leadId, groupId: dto.groupId, bookingDate }),
+            reason: 'Yangi sinov darsi bron qilindi',
+          },
+        });
+      } catch (e) {}
+    }
+
     return booking;
   }
 
@@ -234,17 +250,21 @@ export class BookingsService {
       }
 
       // Record strict audit log
-      await this.prisma.auditLog.create({
-        data: {
-          entityType: 'TrialBooking',
-          entityId: id,
-          action: 'STATUS_REVERSION_ATTENDED_TO_MISSED',
-          changedById: currentUser.id,
-          oldValue: JSON.stringify({ status: oldStatus }),
-          newValue: JSON.stringify({ status: newStatus }),
-          reason,
-        },
-      });
+      if (this.prisma.auditLog?.create) {
+        try {
+          await this.prisma.auditLog.create({
+            data: {
+              entityType: 'TrialBooking',
+              entityId: id,
+              action: 'STATUS_REVERSION_ATTENDED_TO_MISSED',
+              changedById: currentUser.id,
+              oldValue: JSON.stringify({ status: oldStatus }),
+              newValue: JSON.stringify({ status: newStatus }),
+              reason,
+            },
+          });
+        } catch (e) {}
+      }
     }
 
     // Handle cancellation: cancel all pending reminders
@@ -311,6 +331,23 @@ export class BookingsService {
           createdById: currentUser?.id,
         },
       });
+    }
+
+    // Record system audit log
+    if (this.prisma.auditLog?.create) {
+      try {
+        await this.prisma.auditLog.create({
+          data: {
+            entityType: 'TrialBooking',
+            entityId: id,
+            action: `STATUS_CHANGE_${newStatus}`,
+            changedById: currentUser?.id,
+            oldValue: JSON.stringify({ status: oldStatus }),
+            newValue: JSON.stringify({ status: newStatus }),
+            reason: reason || `Sinov darsi holati: ${oldStatus} -> ${newStatus}`,
+          },
+        });
+      } catch (e) {}
     }
 
     return updated;
