@@ -25,19 +25,37 @@ export class ConversationsService {
       }
     }
 
-    // 2. Complaint keywords
-    const complaintKeywords = ['shikoyat', 'noroziman', 'yomon', 'aldov', 'qoniqarsiz', 'pulimni qaytar', 'sudga beraman'];
+    // 2. Complaint keywords & dissatisfaction
+    const complaintKeywords = ['shikoyat', 'noroziman', 'yomon', 'aldov', 'qoniqarsiz', 'pulimni qaytar', 'sudga beraman', 'yoqmadi'];
     for (const kw of complaintKeywords) {
       if (lower.includes(kw)) {
         return { needsHandoff: true, reason: 'COMPLAINT' };
       }
     }
 
-    // 3. Price negotiation / Discounts beyond policy
-    const negotiationKeywords = ['arzonroq qilib bering', 'kelishamizmi', 'yana tushib bering', 'skidka qiling', 'pulim kam'];
+    // 3. Price negotiation / Discounts / Bargaining beyond policy
+    const negotiationKeywords = [
+      'arzonroq',
+      'kelishamizmi',
+      'tushib bering',
+      'skidka',
+      'pulim kam',
+      'qilib bera olasizmi',
+      'chegirma',
+      'aksiya',
+      'narxni tushir',
+    ];
     for (const kw of negotiationKeywords) {
       if (lower.includes(kw)) {
         return { needsHandoff: true, reason: 'PRICE_NEGOTIATION' };
+      }
+    }
+
+    // 4. Payment issues / Transaction problems
+    const paymentKeywords = ['to\'lovim o\'tmadi', 'karta bo\'yicha muammo', 'pul yechildi', 'to\'lov muammo'];
+    for (const kw of paymentKeywords) {
+      if (lower.includes(kw)) {
+        return { needsHandoff: true, reason: 'PAYMENT_ISSUE' };
       }
     }
 
