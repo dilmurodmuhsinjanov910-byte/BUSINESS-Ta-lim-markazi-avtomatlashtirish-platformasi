@@ -248,6 +248,24 @@ export class AiService {
       const catalog = await this.coursesService.getVerifiedCatalog();
       const branches = await this.branchesService.findAll(true);
       const publishedArticles = await this.kbService.getPublishedArticles();
+      const availableGroups = await this.groupsService.findAvailableForTrial();
+
+      // If Gemini AI API is configured, query Gemini with verified database grounding
+      const geminiReply = await this.callGeminiApi(userMessage, {
+        catalog,
+        branches,
+        availableGroups,
+        publishedArticles,
+      });
+
+      if (geminiReply) {
+        await this.conversationsService.addMessage({
+          conversationId: conversation.id,
+          senderType: MessageSender.AI,
+          content: geminiReply,
+        });
+        return { reply: geminiReply, actionTaken: 'GEMINI_GENERATE', needsHumanHandoff: false };
+      }
 
       // Determine intent & execute deterministic tool calling
       const lower = userMessage.toLowerCase();
@@ -367,6 +385,73 @@ export class AiService {
         needsHumanHandoff: true,
         handoffReason: 'LOW_CONFIDENCE',
       };
+    }
+  }
+
+  // Call Google Gemini API with strict zero-hallucination ground truth
+  private async callGeminiApi(
+    userMessage: string,
+    contextData: {
+      catalog: any[];
+      branches: any[];
+      availableGroups: any[];
+      publishedArticles: any[];
+    },
+  ): Promise<string | null> {
+    const apiKey = this.configService.get<string>('AI_API_KEY');
+    if (!apiKey || apiKey === 'mock_ai_key' || apiKey.includes('mock')) {
+      return null;
+    }
+
+    const model = this.configService.get<string>('AI_MODEL') || 'gemini-2.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const systemPrompt = `Siz "Al-Xorazmiy" o'quv markazining rasmiy aqlli AI assistentisiz.
+Qat'iy qoidalar:
+1. Faqat markazning berilgan tasdiqlangan rasmiy ma'lumotlariga tayaning.
+2. Bazada yo'q narx, jadval, chegirma, guruh yoki o'qituvchini o'ylab topmang (Zero-Hallucination).
+3. Foydalanuvchi operator/odam bilan gaplashmoqchi bo'lsa yoki narxni tushirish/savdolashishni so'rasa, xushmuomala tarzda administratorga ulanishni ayting.
+4. Javoblaringiz samimiy, insoniy, qisqa va sodda o'zbek tilida bo'lsin.
+5. Hech qachon boshqa talabalar telefon raqami yoki shaxsiy ma'lumotlarini oshkor qilmang.
+
+Tasdiqlangan markaz ma'lumotlari:
+- Kurslar va oylik narxlar: ${JSON.stringify(contextData.catalog)}
+- Filiallar: ${JSON.stringify(contextData.branches)}
+- Ochiq guruhlar va bo'sh joylar: ${JSON.stringify(contextData.availableGroups)}
+- Bilimlar bazasi: ${JSON.stringify(contextData.publishedArticles)}`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: systemPrompt }],
+          },
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: userMessage }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 600,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        this.logger.warn(`Gemini API javobi: ${response.status} ${response.statusText}`);
+        return null;
+      }
+
+      const data = await response.json();
+      const generatedText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      return generatedText ? generatedText.trim() : null;
+    } catch (err: any) {
+      this.logger.error('Gemini API so\'rovida xatolik:', err.message);
+      return null;
     }
   }
 }
