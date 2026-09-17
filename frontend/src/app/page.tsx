@@ -29,11 +29,15 @@ import {
   GraduationCap,
   Award,
   ClipboardCheck,
+  CreditCard,
+  Receipt,
+  Printer,
+  Wallet,
 } from "lucide-react";
 
 export default function AdminPortal() {
   const [activeTab, setActiveTab] = useState<
-    "dashboard" | "leads" | "trials" | "conversations" | "courses" | "kb" | "tasks" | "attendance" | "audit"
+    "dashboard" | "leads" | "trials" | "conversations" | "courses" | "kb" | "tasks" | "attendance" | "audit" | "finance"
   >("dashboard");
 
   const [isConnectedToBackend, setIsConnectedToBackend] = useState(false);
@@ -325,6 +329,34 @@ export default function AdminPortal() {
   // Attendance Tab Filter
   const [selectedAttendanceGroup, setSelectedAttendanceGroup] = useState<string>("ALL");
 
+  // Finance, Invoicing and Debtors State
+  const [financeSummary, setFinanceSummary] = useState<any>({
+    totalRevenue: 24500000,
+    monthlyRevenue: 8500000,
+    totalDebts: 2100000,
+    totalPaymentsCount: 19,
+    activeStudentsCount: 14,
+    methodBreakdown: { CASH: 10500000, CLICK: 7000000, PAYME: 5000000, UZUM: 1000000, BANK_TRANSFER: 1000000 },
+    currency: "UZS",
+  });
+  const [payments, setPayments] = useState<any[]>([]);
+  const [debtors, setDebtors] = useState<any[]>([]);
+  const [financeSubTab, setFinanceSubTab] = useState<"history" | "debtors">("history");
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>("ALL");
+  const [paymentSearch, setPaymentSearch] = useState<string>("");
+
+  // Payment & Receipt Modals
+  const [showDirectPaymentModal, setShowDirectPaymentModal] = useState(false);
+  const [selectedPayLeadId, setSelectedPayLeadId] = useState<string>("");
+  const [directPayAmount, setDirectPayAmount] = useState<number>(500000);
+  const [directPayMethod, setDirectPayMethod] = useState<string>("CASH");
+  const [directPayNotes, setDirectPayNotes] = useState<string>("");
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
+  const [notifyingDebtorId, setNotifyingDebtorId] = useState<string | null>(null);
+
   // Load real data from backend (Supports silent auto-polling)
   const refreshData = async (isManual = false) => {
     if (isManual) setIsRefreshing(true);
@@ -342,6 +374,9 @@ export default function AdminPortal() {
         auditData,
         groupsData,
         enrollmentsData,
+        financeData,
+        paymentsData,
+        debtorsData,
       ] = await Promise.allSettled([
         crmApi.getKpis(),
         crmApi.getFunnel(),
@@ -354,6 +389,9 @@ export default function AdminPortal() {
         crmApi.getAuditLogs(),
         crmApi.getGroups(),
         crmApi.getEnrollments(),
+        crmApi.getFinanceSummary(),
+        crmApi.getPayments(),
+        crmApi.getDebtors(),
       ]);
 
       let anySuccess = false;
@@ -492,6 +530,18 @@ export default function AdminPortal() {
       }
       if (enrollmentsData.status === "fulfilled" && Array.isArray(enrollmentsData.value)) {
         setEnrollments(enrollmentsData.value);
+        anySuccess = true;
+      }
+      if (financeData.status === "fulfilled" && financeData.value) {
+        setFinanceSummary(financeData.value);
+        anySuccess = true;
+      }
+      if (paymentsData.status === "fulfilled" && Array.isArray(paymentsData.value)) {
+        setPayments(paymentsData.value);
+        anySuccess = true;
+      }
+      if (debtorsData.status === "fulfilled" && Array.isArray(debtorsData.value)) {
+        setDebtors(debtorsData.value);
         anySuccess = true;
       }
 
@@ -706,6 +756,56 @@ export default function AdminPortal() {
     }
   };
 
+  const handleOpenReceipt = async (paymentId: string) => {
+    try {
+      const receipt = await crmApi.getReceipt(paymentId);
+      setSelectedReceipt(receipt);
+      setShowReceiptModal(true);
+    } catch (err: any) {
+      alert("Kvitansiyani yuklashda xatolik: " + (err.message || err));
+    }
+  };
+
+  const handleDirectPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPayLeadId || !directPayAmount) return;
+    setIsProcessingPayment(true);
+    try {
+      const res = await crmApi.directPay({
+        leadId: selectedPayLeadId,
+        amount: Number(directPayAmount),
+        method: directPayMethod,
+        notes: directPayNotes || undefined,
+      });
+      setShowDirectPaymentModal(false);
+      setSelectedPayLeadId("");
+      setDirectPayNotes("");
+      await refreshData(true);
+      if (res?.id) {
+        handleOpenReceipt(res.id);
+      } else {
+        alert("✅ To'lov muvaffaqiyatli qabul qilindi va kvitansiya Telegramga yuborildi!");
+      }
+    } catch (err: any) {
+      alert("To'lovni saqlashda xato: " + (err.message || err));
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
+  const handleNotifyDebtor = async (leadId: string) => {
+    setNotifyingDebtorId(leadId);
+    try {
+      await crmApi.notifyDebtor(leadId);
+      alert("✅ Telegram orqali qarzdorlik eslatmasi muvaffaqiyatli yuborildi!");
+      await refreshData();
+    } catch (err: any) {
+      alert("Eslatmani yuborishda xato: " + (err.message || err));
+    } finally {
+      setNotifyingDebtorId(null);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden">
       {/* Sidebar Navigation */}
@@ -855,6 +955,23 @@ export default function AdminPortal() {
             </button>
 
             <button
+              onClick={() => setActiveTab("finance")}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                activeTab === "finance"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800"
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <CreditCard className="w-5 h-5" />
+                <span>Moliya & To'lovlar</span>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold uppercase">
+                Kassa
+              </span>
+            </button>
+
+            <button
               onClick={() => setActiveTab("audit")}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                 activeTab === "audit"
@@ -900,6 +1017,7 @@ export default function AdminPortal() {
               {activeTab === "kb" && "Bilimlar Bazasi (DRAFT / PUBLISHED)"}
               {activeTab === "tasks" && "Administrator Vazifalari & Eskalatsiya"}
               {activeTab === "attendance" && "Davomat & Baholar Jurnali"}
+              {activeTab === "finance" && "Moliya, Kvitansiyalar & Qarzdorlar Boshqaruvi"}
               {activeTab === "audit" && "Xavfsizlik & Audit Jurnali"}
             </span>
           </div>
@@ -1916,6 +2034,357 @@ export default function AdminPortal() {
               </div>
             </div>
           )}
+
+          {/* MOLIYA & TO'LOVLAR (FINANCE & INVOICES) TAB */}
+          {activeTab === "finance" && (
+            <div className="space-y-6">
+              {/* Header & New Payment action */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div>
+                  <div className="flex items-center space-x-2 mb-1">
+                    <CreditCard className="w-6 h-6 text-indigo-600" />
+                    <h2 className="text-xl font-bold text-slate-900">Moliya va To'lovlar Markazi</h2>
+                  </div>
+                  <p className="text-sm text-slate-500">
+                    O'quv markazining barcha kassa tushumlari, rasmiy kvitansiyalar, usullar bo'yicha taqsimot va qarzdorlar monitoringi
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowDirectPaymentModal(true)}
+                  className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-md shadow-emerald-600/20 transition-all self-start md:self-auto"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Yangi To'lov Qabul Qilish</span>
+                </button>
+              </div>
+
+              {/* KPI Summary Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Jami Tushum</span>
+                    <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600 font-bold">
+                      <Wallet className="w-5 h-5" />
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-slate-900">
+                    {(financeSummary.totalRevenue || 0).toLocaleString()}{" "}
+                    <span className="text-xs font-semibold text-slate-400">UZS</span>
+                  </div>
+                  <p className="text-xs text-emerald-600 font-semibold mt-1">Platforma ishga tushgandan beri</p>
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Shu Oy Tushumi</span>
+                    <span className="p-2 rounded-xl bg-blue-50 text-blue-600">
+                      <TrendingUp className="w-5 h-5" />
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-blue-600">
+                    {(financeSummary.monthlyRevenue || 0).toLocaleString()}{" "}
+                    <span className="text-xs font-semibold text-slate-400">UZS</span>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium mt-1">Joriy hisob-kitob davri</p>
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Qoldiq Qarzdorlik</span>
+                    <span className="p-2 rounded-xl bg-rose-50 text-rose-600 font-bold">
+                      <AlertCircle className="w-5 h-5" />
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-rose-600">
+                    {(financeSummary.totalDebts || 0).toLocaleString()}{" "}
+                    <span className="text-xs font-semibold text-slate-400">UZS</span>
+                  </div>
+                  <p className="text-xs text-rose-500 font-medium mt-1">To'lanmagan oylik to'lovlar</p>
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Faol Talabalar</span>
+                    <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600 font-bold">
+                      <UserCheck className="w-5 h-5" />
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black text-indigo-600">
+                    {financeSummary.activeStudentsCount || enrollments.length || 0}{" "}
+                    <span className="text-xs font-semibold text-slate-400">o'quvchi</span>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium mt-1">
+                    Jami {financeSummary.totalPaymentsCount || payments.length || 0} ta to'lov operatsiyasi
+                  </p>
+                </div>
+              </div>
+
+              {/* Payment Methods Distribution Cards */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
+                  To'lov Usullari Bo'yicha Taqsimot
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                    <div className="text-xs font-medium text-slate-500">💵 Naqd pul (CASH)</div>
+                    <div className="text-sm font-bold text-slate-800 mt-1">
+                      {(financeSummary.methodBreakdown?.CASH || 0).toLocaleString()} UZS
+                    </div>
+                  </div>
+                  <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-200">
+                    <div className="text-xs font-medium text-blue-600">💳 Click</div>
+                    <div className="text-sm font-bold text-blue-900 mt-1">
+                      {(financeSummary.methodBreakdown?.CLICK || 0).toLocaleString()} UZS
+                    </div>
+                  </div>
+                  <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200">
+                    <div className="text-xs font-medium text-emerald-600">📱 Payme</div>
+                    <div className="text-sm font-bold text-emerald-900 mt-1">
+                      {(financeSummary.methodBreakdown?.PAYME || 0).toLocaleString()} UZS
+                    </div>
+                  </div>
+                  <div className="p-3 bg-purple-50/60 rounded-xl border border-purple-200">
+                    <div className="text-xs font-medium text-purple-600">🍇 Uzum Bank</div>
+                    <div className="text-sm font-bold text-purple-900 mt-1">
+                      {(financeSummary.methodBreakdown?.UZUM || 0).toLocaleString()} UZS
+                    </div>
+                  </div>
+                  <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200">
+                    <div className="text-xs font-medium text-amber-600">🏦 Bank O'tkazmasi</div>
+                    <div className="text-sm font-bold text-amber-900 mt-1">
+                      {(financeSummary.methodBreakdown?.BANK_TRANSFER || 0).toLocaleString()} UZS
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Subtabs Switcher */}
+              <div className="flex items-center space-x-2 border-b border-slate-200 pb-2">
+                <button
+                  onClick={() => setFinanceSubTab("history")}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 ${
+                    financeSubTab === "history"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20"
+                      : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  <Receipt className="w-4 h-4" />
+                  <span>To'lovlar Tarixi & Kvitansiyalar ({payments.length})</span>
+                </button>
+                <button
+                  onClick={() => setFinanceSubTab("debtors")}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 ${
+                    financeSubTab === "debtors"
+                      ? "bg-rose-600 text-white shadow-md shadow-rose-600/20"
+                      : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  <AlertCircle className="w-4 h-4" />
+                  <span>Qarzdorlar Ro'yxati ({debtors.length})</span>
+                </button>
+              </div>
+
+              {/* Subtab 1: Payment History */}
+              {financeSubTab === "history" && (
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                  {/* Search and Filters */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="relative flex-1 max-w-sm">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Talaba ismi yoki telefon raqami..."
+                        value={paymentSearch}
+                        onChange={(e) => setPaymentSearch(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-slate-400 font-medium">To'lov usuli:</span>
+                      <select
+                        value={paymentMethodFilter}
+                        onChange={(e) => setPaymentMethodFilter(e.target.value)}
+                        className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 bg-white focus:outline-none"
+                      >
+                        <option value="ALL">Barcha Usullar</option>
+                        <option value="CASH">Naqd Pul (CASH)</option>
+                        <option value="CLICK">Click</option>
+                        <option value="PAYME">Payme</option>
+                        <option value="UZUM">Uzum Bank</option>
+                        <option value="BANK_TRANSFER">Bank O'tkazmasi</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Payments Table */}
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase">
+                          <th className="py-3 px-4">Kvitansiya №</th>
+                          <th className="py-3 px-4">Talaba</th>
+                          <th className="py-3 px-4">Summa</th>
+                          <th className="py-3 px-4">To'lov Usuli</th>
+                          <th className="py-3 px-4">Holat</th>
+                          <th className="py-3 px-4">Sana & Vaqt</th>
+                          <th className="py-3 px-4 text-right">Amal</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-xs">
+                        {(() => {
+                          const filtered = payments.filter((p) => {
+                            const matchesSearch =
+                              !paymentSearch ||
+                              p.lead?.fullName?.toLowerCase().includes(paymentSearch.toLowerCase()) ||
+                              p.lead?.phone?.includes(paymentSearch);
+                            const matchesMethod =
+                              paymentMethodFilter === "ALL" || p.method === paymentMethodFilter;
+                            return matchesSearch && matchesMethod;
+                          });
+
+                          if (filtered.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
+                                  To'lovlar topilmadi.
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return filtered.map((p) => {
+                            const receiptNum = `INV-${p.id.slice(-6).toUpperCase()}`;
+                            return (
+                              <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
+                                <td className="py-3 px-4 font-mono font-bold text-indigo-600">
+                                  {receiptNum}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <div className="font-bold text-slate-800">{p.lead?.fullName || "Talaba"}</div>
+                                  <div className="text-[11px] text-slate-400 font-mono">{p.lead?.phone}</div>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span className="font-black text-slate-900 text-sm">
+                                    {p.amount.toLocaleString()}
+                                  </span>{" "}
+                                  <span className="text-[10px] font-semibold text-slate-400">{p.currency}</span>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-700 border border-slate-200">
+                                    {p.method}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                    TO'LANDI
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-slate-500">
+                                  {new Date(p.paidAt || p.createdAt).toLocaleString()}
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  <button
+                                    onClick={() => handleOpenReceipt(p.id)}
+                                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg text-xs transition-colors flex items-center space-x-1.5 ml-auto border border-indigo-200"
+                                  >
+                                    <Receipt className="w-3.5 h-3.5" />
+                                    <span>Kvitansiya</span>
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Subtab 2: Debtors List */}
+              {financeSubTab === "debtors" && (
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">Muddati Yaqinlashgan va Qarzdor Talabalar</h3>
+                      <p className="text-xs text-slate-500">Oylik to'lovi to'liq qoplanmagan talabalar ro'yxati</p>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase">
+                          <th className="py-3 px-4">Talaba</th>
+                          <th className="py-3 px-4">Guruh & Kurs</th>
+                          <th className="py-3 px-4">Oylik To'lov</th>
+                          <th className="py-3 px-4">To'langan</th>
+                          <th className="py-3 px-4">Qoldiq Qarz</th>
+                          <th className="py-3 px-4">To'lov Muddati</th>
+                          <th className="py-3 px-4 text-right">Eslatma Yuborish</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-xs">
+                        {debtors.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
+                              Qarzdor talabalar mavjud emas. Barcha o'quvchilar hisobi toza! 🎉
+                            </td>
+                          </tr>
+                        ) : (
+                          debtors.map((d) => (
+                            <tr key={d.enrollmentId} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="py-3 px-4">
+                                <div className="font-bold text-slate-800">{d.fullName}</div>
+                                <div className="text-[11px] text-slate-400 font-mono flex items-center space-x-1.5">
+                                  <span>{d.phone}</span>
+                                  {d.telegramId && (
+                                    <span className="text-blue-500 font-sans text-[10px] bg-blue-50 px-1.5 py-0.5 rounded-full border border-blue-200">
+                                      Telegram
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="font-semibold text-slate-800">{d.groupName}</div>
+                                <div className="text-[11px] text-slate-400">{d.courseName}</div>
+                              </td>
+                              <td className="py-3 px-4 font-semibold text-slate-700">
+                                {d.monthlyFee.toLocaleString()} UZS
+                              </td>
+                              <td className="py-3 px-4 font-semibold text-emerald-600">
+                                {d.paidThisMonth.toLocaleString()} UZS
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className="font-black text-rose-600 text-sm">
+                                  {d.remainingDebt.toLocaleString()} UZS
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 font-mono text-slate-500">
+                                {d.dueDate}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <button
+                                  onClick={() => handleNotifyDebtor(d.leadId)}
+                                  disabled={notifyingDebtorId === d.leadId}
+                                  className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg text-xs transition-colors flex items-center space-x-1.5 ml-auto border border-blue-200 disabled:opacity-50"
+                                >
+                                  <Send className="w-3.5 h-3.5" />
+                                  <span>
+                                    {notifyingDebtorId === d.leadId ? "Yuborilmoqda..." : "💬 Telegram Eslatma"}
+                                  </span>
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </main>
 
@@ -2192,6 +2661,258 @@ export default function AdminPortal() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Direct Payment */}
+      {showDirectPaymentModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <CreditCard className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 leading-none">To'lovni Qabul Qilish</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Kassa orqali tezkor to'lov kiritish va kvitansiya chiqarish</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDirectPaymentModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleDirectPayment} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Talaba / Lead</label>
+                <select
+                  value={selectedPayLeadId}
+                  onChange={(e) => {
+                    const lId = e.target.value;
+                    setSelectedPayLeadId(lId);
+                    const debtor = debtors.find((d) => d.leadId === lId);
+                    if (debtor && debtor.remainingDebt > 0) {
+                      setDirectPayAmount(debtor.remainingDebt);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-emerald-500"
+                  required
+                >
+                  <option value="">-- Talabani tanlang --</option>
+                  {leads.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.fullName} ({l.phone}) - {l.preferredCourse}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">To'lov Summasi (UZS)</label>
+                <input
+                  type="number"
+                  min={1000}
+                  step={10000}
+                  value={directPayAmount}
+                  onChange={(e) => setDirectPayAmount(Number(e.target.value))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold text-emerald-700 focus:ring-2 focus:ring-emerald-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">To'lov Usuli</label>
+                <select
+                  value={directPayMethod}
+                  onChange={(e) => setDirectPayMethod(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-emerald-500"
+                  required
+                >
+                  <option value="CASH">💵 Naqd pul (CASH)</option>
+                  <option value="CLICK">📱 CLICK</option>
+                  <option value="PAYME">💳 Payme</option>
+                  <option value="UZUM">🍇 Uzum Bank</option>
+                  <option value="BANK_TRANSFER">🏦 Bank o'tkazmasi</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Izoh (ixtiyoriy)</label>
+                <input
+                  type="text"
+                  placeholder="Masalan: 1-oy uchun to'lov yoki chegirma bilan"
+                  value={directPayNotes}
+                  onChange={(e) => setDirectPayNotes(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setShowDirectPaymentModal(false)}
+                  className="px-4 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Bekor qilish
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessingPayment || !selectedPayLeadId || !directPayAmount}
+                  className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm flex items-center space-x-1.5"
+                >
+                  {isProcessingPayment ? (
+                    <span>Saqlanmoqda...</span>
+                  ) : (
+                    <>
+                      <Receipt className="w-3.5 h-3.5" />
+                      <span>To'lovni Tasdiqlash & Kvitansiya</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: View & Print Official Receipt */}
+      {showReceiptModal && selectedReceipt && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-150 relative">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 no-print">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Rasmiy To'lov Kvitansiyasi
+              </span>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => {
+                    if (typeof window !== "undefined") window.print();
+                  }}
+                  className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold flex items-center space-x-1.5 border border-indigo-200 transition-colors"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Chop etish (Print / PDF)</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowReceiptModal(false);
+                    setSelectedReceipt(null);
+                  }}
+                  className="text-slate-400 hover:text-slate-600 p-1 font-bold text-base"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Printable Receipt Paper Container */}
+            <div className="printable-receipt mt-4 p-6 bg-slate-50/50 rounded-xl border border-slate-200 font-mono text-slate-800 text-xs">
+              {/* Header */}
+              <div className="text-center pb-4 border-b border-dashed border-slate-300">
+                <div className="font-black text-sm tracking-wider uppercase text-slate-900">
+                  {selectedReceipt.centerInfo?.name || "AL-XORAZMIY O'QUV MARKAZI"}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  {selectedReceipt.centerInfo?.tagline || "Zamonaviy IT & Til Ta'lim Maskani"}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  Tel: {selectedReceipt.centerInfo?.phone || "+998 71 200-00-00"} | Manzil: Toshkent sh.
+                </div>
+              </div>
+
+              {/* Receipt Number & Date */}
+              <div className="py-3 border-b border-dashed border-slate-300 space-y-1 text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Kvitansiya №:</span>
+                  <span className="font-bold text-slate-900">{selectedReceipt.receiptNumber}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Sana va vaqt:</span>
+                  <span className="font-semibold text-slate-700">{selectedReceipt.paymentDate}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Kassir / Qabul qiluvchi:</span>
+                  <span className="font-semibold text-slate-700">{selectedReceipt.cashier}</span>
+                </div>
+              </div>
+
+              {/* Student & Course Details */}
+              <div className="py-3 border-b border-dashed border-slate-300 space-y-1 text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">O'quvchi:</span>
+                  <span className="font-bold text-slate-900">{selectedReceipt.student?.fullName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Telefon:</span>
+                  <span className="font-semibold text-slate-700">{selectedReceipt.student?.phone}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Kurs / Guruh:</span>
+                  <span className="font-semibold text-slate-700">
+                    {selectedReceipt.student?.groupName || selectedReceipt.student?.courseName || "General English"}
+                  </span>
+                </div>
+                {selectedReceipt.notes && (
+                  <div className="flex justify-between text-slate-500 text-[10px] pt-1 italic">
+                    <span>Izoh:</span>
+                    <span>{selectedReceipt.notes}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Amount & Method */}
+              <div className="py-4 border-b-2 border-slate-800 space-y-2">
+                <div className="flex justify-between items-baseline">
+                  <span className="text-xs uppercase font-bold text-slate-600">To'lov Usuli:</span>
+                  <span className="font-bold bg-slate-200 px-2 py-0.5 rounded text-slate-800 text-[11px]">
+                    {selectedReceipt.method}
+                  </span>
+                </div>
+                <div className="flex justify-between items-baseline pt-1">
+                  <span className="text-sm font-black text-slate-900">JAMI TO'LANDI:</span>
+                  <span className="text-lg font-black text-emerald-600 font-sans">
+                    {selectedReceipt.amount?.toLocaleString()} {selectedReceipt.currency || "UZS"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Footer Stamp / Verification */}
+              <div className="pt-4 text-center space-y-2">
+                <div className="text-[10px] text-slate-500">
+                  Ushbu to'lov kvitansiyasi avtomatlashtirilgan CRM tizimi orqali yaratilgan va tasdiqlangan.
+                </div>
+                <div className="flex items-center justify-center space-x-2 text-[10px] text-emerald-700 font-bold bg-emerald-50 py-1.5 px-3 rounded-lg border border-emerald-200">
+                  <span>✓ ELEKTRON TASDIQLANGAN</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Bottom Buttons */}
+            <div className="mt-4 flex justify-end space-x-3 no-print">
+              <button
+                onClick={() => {
+                  setShowReceiptModal(false);
+                  setSelectedReceipt(null);
+                }}
+                className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold"
+              >
+                Yopish
+              </button>
+              <button
+                onClick={() => {
+                  if (typeof window !== "undefined") window.print();
+                }}
+                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center space-x-1.5 shadow-sm"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Chekni Chop Etish</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
