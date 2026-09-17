@@ -139,4 +139,32 @@ export const crmApi = {
 
   // Audit Logs
   getAuditLogs: () => fetchApi<any[]>('/audit'),
+
+  // Enrollments
+  enrollStudent: (dto: { leadId: string; groupId: string; monthlyFee?: number }) =>
+    fetchApi<any>('/enrollments', { method: 'POST', body: JSON.stringify(dto) }),
+  getEnrollments: (groupId?: string) =>
+    fetchApi<any[]>(groupId ? `/enrollments?groupId=${groupId}` : '/enrollments'),
+  getStudentPortal: (identifier: string) =>
+    fetchApi<any>(`/enrollments/student/${encodeURIComponent(identifier)}`),
+  getTeacherPortal: (teacherId?: string) =>
+    fetchApi<any>(teacherId ? `/enrollments/teacher?teacherId=${teacherId}` : '/enrollments/teacher'),
+
+  // Attendance
+  recordAttendance: (dto: { groupId: string; date: string; records: any[]; markedById?: string }) =>
+    fetchApi<any>('/attendance', { method: 'POST', body: JSON.stringify(dto) }),
+  getGroupAttendance: (groupId: string, date?: string) =>
+    fetchApi<any[]>(`/attendance/group/${groupId}${date ? `?date=${date}` : ''}`),
+
+  // Grades
+  recordGrade: (dto: {
+    enrollmentId: string;
+    score: number;
+    maxScore?: number;
+    gradeType?: string;
+    title: string;
+    comment?: string;
+  }) => fetchApi<any>('/grades', { method: 'POST', body: JSON.stringify(dto) }),
+  getGroupGrades: (groupId: string) => fetchApi<any[]>(`/grades/group/${groupId}`),
 };
+

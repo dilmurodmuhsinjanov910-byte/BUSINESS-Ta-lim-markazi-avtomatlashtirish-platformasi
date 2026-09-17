@@ -26,11 +26,14 @@ import {
   UserX,
   Layers,
   Sparkles,
+  GraduationCap,
+  Award,
+  ClipboardCheck,
 } from "lucide-react";
 
 export default function AdminPortal() {
   const [activeTab, setActiveTab] = useState<
-    "dashboard" | "leads" | "trials" | "conversations" | "courses" | "kb" | "tasks" | "audit"
+    "dashboard" | "leads" | "trials" | "conversations" | "courses" | "kb" | "tasks" | "attendance" | "audit"
   >("dashboard");
 
   const [isConnectedToBackend, setIsConnectedToBackend] = useState(false);
@@ -308,23 +311,50 @@ export default function AdminPortal() {
     },
   ]);
 
+  // Groups and Enrollments State
+  const [groups, setGroups] = useState<any[]>([]);
+  const [enrollments, setEnrollments] = useState<any[]>([]);
+
+  // Enrollment Modal State
+  const [showEnrollModal, setShowEnrollModal] = useState(false);
+  const [enrollingLead, setEnrollingLead] = useState<any | null>(null);
+  const [selectedEnrollGroupId, setSelectedEnrollGroupId] = useState<string>("");
+  const [enrollMonthlyFee, setEnrollMonthlyFee] = useState<number>(450000);
+  const [isEnrolling, setIsEnrolling] = useState(false);
+
+  // Attendance Tab Filter
+  const [selectedAttendanceGroup, setSelectedAttendanceGroup] = useState<string>("ALL");
+
   // Load real data from backend (Supports silent auto-polling)
   const refreshData = async (isManual = false) => {
     if (isManual) setIsRefreshing(true);
     try {
       await ensureAuthenticated();
-      const [kpiData, funnelData, leadsData, bookingsData, convsData, coursesData, kbData, tasksData, auditData] =
-        await Promise.allSettled([
-          crmApi.getKpis(),
-          crmApi.getFunnel(),
-          crmApi.getLeads(),
-          crmApi.getBookings(),
-          crmApi.getConversations(),
-          crmApi.getCourses(),
-          crmApi.getKnowledgeBase(),
-          crmApi.getTasks(),
-          crmApi.getAuditLogs(),
-        ]);
+      const [
+        kpiData,
+        funnelData,
+        leadsData,
+        bookingsData,
+        convsData,
+        coursesData,
+        kbData,
+        tasksData,
+        auditData,
+        groupsData,
+        enrollmentsData,
+      ] = await Promise.allSettled([
+        crmApi.getKpis(),
+        crmApi.getFunnel(),
+        crmApi.getLeads(),
+        crmApi.getBookings(),
+        crmApi.getConversations(),
+        crmApi.getCourses(),
+        crmApi.getKnowledgeBase(),
+        crmApi.getTasks(),
+        crmApi.getAuditLogs(),
+        crmApi.getGroups(),
+        crmApi.getEnrollments(),
+      ]);
 
       let anySuccess = false;
 
@@ -454,6 +484,14 @@ export default function AdminPortal() {
             time: new Date(a.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           }))
         );
+        anySuccess = true;
+      }
+      if (groupsData.status === "fulfilled" && Array.isArray(groupsData.value)) {
+        setGroups(groupsData.value);
+        anySuccess = true;
+      }
+      if (enrollmentsData.status === "fulfilled" && Array.isArray(enrollmentsData.value)) {
+        setEnrollments(enrollmentsData.value);
         anySuccess = true;
       }
 
@@ -645,6 +683,29 @@ export default function AdminPortal() {
     }
   };
 
+  const handleEnrollStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!enrollingLead || !selectedEnrollGroupId) return;
+
+    try {
+      setIsEnrolling(true);
+      await crmApi.enrollStudent({
+        leadId: enrollingLead.id,
+        groupId: selectedEnrollGroupId,
+        monthlyFee: Number(enrollMonthlyFee),
+      });
+
+      setShowEnrollModal(false);
+      setEnrollingLead(null);
+      await refreshData(true);
+      alert("🎉 O'quvchi kursga muvaffaqiyatli qabul qilindi!\nTelegram bot orqali o'quvchiga Mini App havolasi yuborildi.");
+    } catch (err: any) {
+      alert(err.message || "Qabul qilishda xatolik yuz berdi");
+    } finally {
+      setIsEnrolling(false);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden">
       {/* Sidebar Navigation */}
@@ -773,6 +834,23 @@ export default function AdminPortal() {
               </div>
               <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 font-semibold">
                 {tasks.filter((t) => t.status === "TODO").length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("attendance")}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                activeTab === "attendance"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800"
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <GraduationCap className="w-5 h-5" />
+                <span>Davomat & Baholar</span>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold uppercase">
+                Mini App
               </span>
             </button>
 
@@ -1078,7 +1156,28 @@ export default function AdminPortal() {
                             <div className="text-xs text-red-500 mt-1">Sabab: {lead.lostReason}</div>
                           )}
                         </td>
-                        <td className="py-4 px-6 text-right space-x-2">
+                        <td className="py-4 px-6 text-right space-x-2 whitespace-nowrap">
+                          {lead.status === "WON" ? (
+                            <span className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span>✓ Qabul qilingan</span>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setEnrollingLead(lead);
+                                if (groups.length > 0) {
+                                  setSelectedEnrollGroupId(groups[0].id);
+                                  setEnrollMonthlyFee(groups[0].course?.monthlyPrice || 450000);
+                                }
+                                setShowEnrollModal(true);
+                              }}
+                              className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition shadow-xs"
+                              title="Talabani kursga qabul qilish va Telegram Mini App ochish"
+                            >
+                              <span>🎓 Qabul qilish</span>
+                            </button>
+                          )}
+
                           <button
                             onClick={() => {
                               const foundConv = conversations.find(
@@ -1504,6 +1603,282 @@ export default function AdminPortal() {
             </div>
           )}
 
+          {/* DAVOMAT & BAHOLAR (ATTENDANCE & GRADES) TAB */}
+          {activeTab === "attendance" && (
+            <div className="space-y-6">
+              {/* Header card with Mini App launchers */}
+              <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-purple-900 text-white p-6 rounded-2xl shadow-lg border border-indigo-700/50">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center space-x-2.5">
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                        📱 Telegram Mini App Integratsiyasi
+                      </span>
+                      <span className="text-xs text-indigo-200">Real vaqtda sinxronizatsiya</span>
+                    </div>
+                    <h2 className="text-xl font-black mt-2 tracking-tight text-white">
+                      Davomat & Baholar Nazorat Jurnali
+                    </h2>
+                    <p className="text-xs text-indigo-100/80 mt-1 max-w-xl leading-relaxed">
+                      O'qituvchilar Telegram orqali qo'ygan davomat va baholar avtomatik tarzda ushbu markaziy boshqaruv paneliga tushadi hamda o'quvchining shaxsiy Telegram Mini App kabinetida aks etadi.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <a
+                      href="/teacher"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition flex items-center space-x-2"
+                    >
+                      <span>👨‍🏫</span>
+                      <span>O'qituvchi Jurnali (Mini App)</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                    <a
+                      href="/student"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition flex items-center space-x-2"
+                    >
+                      <span>📱</span>
+                      <span>Talaba Kabineti (Mini App)</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                </div>
+
+                {/* KPI counters */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-indigo-700/60">
+                  <div className="bg-white/5 backdrop-blur p-3.5 rounded-xl border border-white/10">
+                    <span className="text-xs text-indigo-200">Faol O'quvchilar</span>
+                    <p className="text-2xl font-black mt-1 text-white">{enrollments.length} ta</p>
+                  </div>
+                  <div className="bg-white/5 backdrop-blur p-3.5 rounded-xl border border-white/10">
+                    <span className="text-xs text-indigo-200">Guruhlar Soni</span>
+                    <p className="text-2xl font-black mt-1 text-white">{groups.length} ta</p>
+                  </div>
+                  <div className="bg-white/5 backdrop-blur p-3.5 rounded-xl border border-white/10">
+                    <span className="text-xs text-indigo-200">Jami Davomatlar</span>
+                    <p className="text-2xl font-black mt-1 text-emerald-400">
+                      {enrollments.reduce((acc, e) => acc + (e.attendances?.length || 0), 0)} dars
+                    </p>
+                  </div>
+                  <div className="bg-white/5 backdrop-blur p-3.5 rounded-xl border border-white/10">
+                    <span className="text-xs text-indigo-200">Markaz O'rtacha Bali</span>
+                    <p className="text-2xl font-black mt-1 text-amber-300">
+                      {(() => {
+                        const allGrades = enrollments.flatMap((e) => e.grades || []);
+                        if (allGrades.length === 0) return "—";
+                        const sum = allGrades.reduce((a, b) => a + (b.score || 0), 0);
+                        return `${Math.round(sum / allGrades.length)} / 100`;
+                      })()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Group Filter bar */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <span className="text-xs font-bold text-slate-700">Guruh bo'yicha saralash:</span>
+                  <select
+                    value={selectedAttendanceGroup}
+                    onChange={(e) => setSelectedAttendanceGroup(e.target.value)}
+                    className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold bg-slate-50 text-slate-800 focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="ALL">Barcha Guruhlar ({groups.length})</option>
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name} — {g.course?.name || "Kurs"} ({g.currentStudents}/{g.maxStudents})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  onClick={() => refreshData(true)}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+                  <span>Yangilash</span>
+                </button>
+              </div>
+
+              {/* Attendance and Grades Tables */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* 1. Daily Attendance Table */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col">
+                  <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
+                    <div className="flex items-center space-x-2">
+                      <ClipboardCheck className="w-5 h-5 text-emerald-600" />
+                      <h3 className="font-bold text-sm text-slate-900">
+                        Kunlik Davomat Jurnali
+                      </h3>
+                    </div>
+                    <span className="text-xs text-slate-400 font-medium">Ustoz kiritgan qaydlar</span>
+                  </div>
+
+                  {(() => {
+                    const filteredEnrollments =
+                      selectedAttendanceGroup === "ALL"
+                        ? enrollments
+                        : enrollments.filter((e) => e.groupId === selectedAttendanceGroup);
+
+                    const allAtts = filteredEnrollments.flatMap((e) =>
+                      (e.attendances || []).map((att: any) => ({
+                        ...att,
+                        studentName: e.lead?.fullName || "O'quvchi",
+                        groupName: e.group?.name || "Guruh",
+                        courseName: e.group?.course?.name || "",
+                      }))
+                    );
+
+                    if (allAtts.length === 0) {
+                      return (
+                        <div className="py-12 text-center text-slate-400 text-xs my-auto">
+                          <p>Hozircha davomat qaydlari mavjud emas.</p>
+                          <p className="mt-1 text-slate-500">
+                            O'qituvchi <a href="/teacher" target="_blank" className="text-indigo-600 underline font-semibold">O'qituvchi Jurnali</a> orqali davomat belgilashi mumkin.
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 font-bold uppercase">
+                              <th className="py-2.5 px-3">O'quvchi</th>
+                              <th className="py-2.5 px-3">Guruh</th>
+                              <th className="py-2.5 px-3">Sana</th>
+                              <th className="py-2.5 px-3">Holat</th>
+                              <th className="py-2.5 px-3">Izoh</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {allAtts.slice(0, 20).map((att: any) => (
+                              <tr key={att.id} className="hover:bg-slate-50/70">
+                                <td className="py-2.5 px-3 font-semibold text-slate-800">
+                                  {att.studentName}
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-600">
+                                  {att.groupName}
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-500">
+                                  {new Date(att.date).toLocaleDateString("uz-UZ")}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  {att.status === "PRESENT" && (
+                                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold">Bor</span>
+                                  )}
+                                  {att.status === "LATE" && (
+                                    <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">Kech</span>
+                                  )}
+                                  {att.status === "EXCUSED" && (
+                                    <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-semibold">Sababli</span>
+                                  )}
+                                  {att.status === "ABSENT" && (
+                                    <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-semibold">Yo'q</span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-400 italic">
+                                  {att.notes || "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* 2. Grades and Homework Table */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col">
+                  <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
+                    <div className="flex items-center space-x-2">
+                      <Award className="w-5 h-5 text-amber-500" />
+                      <h3 className="font-bold text-sm text-slate-900">
+                        O'quvchilar Baholari & Topshiriqlar
+                      </h3>
+                    </div>
+                    <span className="text-xs text-slate-400 font-medium">Baho va uy vazifalar</span>
+                  </div>
+
+                  {(() => {
+                    const filteredEnrollments =
+                      selectedAttendanceGroup === "ALL"
+                        ? enrollments
+                        : enrollments.filter((e) => e.groupId === selectedAttendanceGroup);
+
+                    const allGrades = filteredEnrollments.flatMap((e) =>
+                      (e.grades || []).map((grd: any) => ({
+                        ...grd,
+                        studentName: e.lead?.fullName || "O'quvchi",
+                        groupName: e.group?.name || "Guruh",
+                      }))
+                    );
+
+                    if (allGrades.length === 0) {
+                      return (
+                        <div className="py-12 text-center text-slate-400 text-xs my-auto">
+                          <p>Hozircha baholash qaydlari mavjud emas.</p>
+                          <p className="mt-1 text-slate-500">
+                            O'qituvchi <a href="/teacher" target="_blank" className="text-indigo-600 underline font-semibold">O'qituvchi Jurnali</a> orqali ball qo'yishi mumkin.
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 font-bold uppercase">
+                              <th className="py-2.5 px-3">O'quvchi</th>
+                              <th className="py-2.5 px-3">Mavzu / Vazifa</th>
+                              <th className="py-2.5 px-3">Turi</th>
+                              <th className="py-2.5 px-3 text-center">Ball</th>
+                              <th className="py-2.5 px-3">Izoh</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y border-slate-100">
+                            {allGrades.slice(0, 20).map((grd: any) => (
+                              <tr key={grd.id} className="hover:bg-slate-50/70">
+                                <td className="py-2.5 px-3 font-semibold text-slate-800">
+                                  {grd.studentName}
+                                  <span className="block text-[11px] text-slate-400 font-normal">
+                                    {grd.groupName}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-800 font-medium">
+                                  {grd.title}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold text-[11px]">
+                                    {grd.gradeType}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 text-center font-black text-indigo-600">
+                                  {grd.score} / {grd.maxScore}
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-500 text-[11px] italic">
+                                  {grd.comment || "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* AUDIT JURNALI TAB */}
           {activeTab === "audit" && (
             <div className="space-y-6">
@@ -1715,6 +2090,104 @@ export default function AdminPortal() {
                   className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-sm"
                 >
                   Saqlash va Nashr etish
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Enroll Lead to Group */}
+      {showEnrollModal && enrollingLead && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
+            <div className="flex items-center space-x-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-xl font-bold">
+                🎓
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 leading-tight">Kursga Qabul Qilish</h3>
+                <p className="text-xs text-slate-500">Talabani guruhga biriktirish va Telegram Mini App ochish</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4 text-xs space-y-1">
+              <p>
+                <span className="text-slate-400">Talaba:</span>{" "}
+                <strong className="text-slate-800">{enrollingLead.fullName}</strong>
+              </p>
+              <p>
+                <span className="text-slate-400">Telefon:</span>{" "}
+                <strong className="text-slate-800">{enrollingLead.phone}</strong>
+              </p>
+              {enrollingLead.telegramId ? (
+                <p className="text-indigo-600 font-semibold flex items-center space-x-1 mt-1">
+                  <span>📱</span>
+                  <span>Telegram bot orqali Mini App bildirishnomasi yuboriladi</span>
+                </p>
+              ) : (
+                <p className="text-amber-600 text-[11px] mt-1">
+                  ℹ️ Talabaning Telegram ID si yo'q, kabinet havolasi telefon orqali taqdim etilishi mumkin.
+                </p>
+              )}
+            </div>
+
+            <form onSubmit={handleEnrollStudent} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">O'quv Guruhi</label>
+                <select
+                  value={selectedEnrollGroupId}
+                  onChange={(e) => {
+                    const gId = e.target.value;
+                    setSelectedEnrollGroupId(gId);
+                    const grp = groups.find((g) => g.id === gId);
+                    if (grp?.course?.monthlyPrice) {
+                      setEnrollMonthlyFee(grp.course.monthlyPrice);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-medium focus:ring-2 focus:ring-emerald-500"
+                  required
+                >
+                  <option value="">-- Guruhni tanlang --</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id} disabled={g.currentStudents >= g.maxStudents}>
+                      {g.name} — {g.course?.name || "Kurs"} ({g.currentStudents}/{g.maxStudents} o'quvchi){" "}
+                      {g.currentStudents >= g.maxStudents ? "[TO'LGAN]" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Oylik To'lov Miqdori (UZS)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={10000}
+                  value={enrollMonthlyFee}
+                  onChange={(e) => setEnrollMonthlyFee(Number(e.target.value))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold text-emerald-700 focus:ring-2 focus:ring-emerald-500"
+                  required
+                />
+              </div>
+
+              <div className="pt-3 flex items-center justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEnrollModal(false);
+                    setEnrollingLead(null);
+                  }}
+                  className="px-4 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Bekor qilish
+                </button>
+                <button
+                  type="submit"
+                  disabled={isEnrolling || !selectedEnrollGroupId}
+                  className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm flex items-center space-x-1.5"
+                >
+                  {isEnrolling ? <span>Biriktirilmoqda...</span> : <span>🎓 Qabul qilish va Telegramga yuborish</span>}
                 </button>
               </div>
             </form>
