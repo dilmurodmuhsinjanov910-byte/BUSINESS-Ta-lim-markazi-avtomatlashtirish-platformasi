@@ -22,6 +22,7 @@ describe('BookingsService', () => {
       findMany: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
     },
     reminder: {
       createMany: jest.fn(),
@@ -69,6 +70,26 @@ describe('BookingsService', () => {
         service.createBooking({
           leadId: 'lead-1',
           groupId: 'group-full',
+          bookingDate: new Date().toISOString(),
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject booking if active bookings for that date reach group capacity', async () => {
+      (mockPrisma.lead.findUnique as jest.Mock).mockResolvedValue({ id: 'lead-1', score: 50 });
+      (mockPrisma.group.findUnique as jest.Mock).mockResolvedValue({
+        id: 'group-1',
+        name: 'ENG-1',
+        currentStudents: 10,
+        maxStudents: 12,
+        status: GroupStatus.RECRUITING,
+      });
+      (mockPrisma.trialBooking.count as jest.Mock).mockResolvedValue(2);
+
+      await expect(
+        service.createBooking({
+          leadId: 'lead-1',
+          groupId: 'group-1',
           bookingDate: new Date().toISOString(),
         }),
       ).rejects.toThrow(BadRequestException);
