@@ -3,6 +3,7 @@ import { LeadsService } from './leads/leads.service';
 import { BookingsService } from './bookings/bookings.service';
 import { ConversationsService } from './conversations/conversations.service';
 import { PaymentsService } from './payments/payments.service';
+import { TelegramService } from './telegram/telegram.service';
 import { PrismaService } from './prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { LeadStatus, BookingStatus, ConversationStatus, PaymentStatus, PaymentMethod, ScoreTier, GroupStatus } from '@prisma/client';
@@ -50,6 +51,16 @@ describe('UAT Final Integration Flow: Lead -> IELTS -> Filial -> Trial -> Remind
         BookingsService,
         ConversationsService,
         PaymentsService,
+        {
+          provide: TelegramService,
+          useValue: {
+            sendPaymentReceiptAlert: jest.fn().mockResolvedValue(true),
+            sendPaymentReminderAlert: jest.fn().mockResolvedValue(true),
+            sendEnrollmentNotification: jest.fn().mockResolvedValue(true),
+            sendAttendanceAlert: jest.fn().mockResolvedValue(true),
+            sendGradeAlert: jest.fn().mockResolvedValue(true),
+          },
+        },
         {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('mock_val') },
