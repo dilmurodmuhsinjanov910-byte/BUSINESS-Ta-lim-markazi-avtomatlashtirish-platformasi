@@ -74,6 +74,25 @@ export class PaymentsService {
       },
     });
 
+    // If lead had an active or attended trial booking in a group, increment enrolled students count
+    const latestBooking = await this.prisma.trialBooking.findFirst({
+      where: { leadId: payment.leadId },
+      orderBy: { bookingDate: 'desc' },
+    });
+    if (latestBooking) {
+      const group = await this.prisma.group.findUnique({ where: { id: latestBooking.groupId } });
+      if (group && group.currentStudents < group.maxStudents) {
+        const newCount = group.currentStudents + 1;
+        await this.prisma.group.update({
+          where: { id: group.id },
+          data: {
+            currentStudents: newCount,
+            status: newCount >= group.maxStudents ? 'FULL' : group.status,
+          },
+        });
+      }
+    }
+
     await this.prisma.leadActivity.create({
       data: {
         leadId: payment.leadId,

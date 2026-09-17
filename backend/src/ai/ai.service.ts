@@ -13,11 +13,16 @@ export interface AiProcessInput {
   leadId: string;
   conversationId?: string;
   userMessage: string;
+  toolCall?: {
+    name: 'getCourses' | 'getBranches' | 'getAvailableGroups' | 'createLead' | 'createTrialBooking';
+    args: any;
+  };
 }
 
 export interface AiProcessOutput {
   reply: string;
   actionTaken?: string;
+  toolResult?: any;
   needsHumanHandoff: boolean;
   handoffReason?: string;
 }
@@ -74,12 +79,119 @@ export class AiService {
     return { isInjection: false };
   }
 
+  // Tool / Function Calling definitions for AI orchestrator
+  getTools() {
+    return [
+      {
+        name: 'getCourses',
+        description: 'Rasmiy tasdiqlangan kurslar va narxlar katalogini olish (Zero-Hallucination)',
+        parameters: { type: 'object', properties: {} },
+      },
+      {
+        name: 'getBranches',
+        description: 'Faol filiallar manzillari, telefonlari va joylashuvlarini olish',
+        parameters: { type: 'object', properties: {} },
+      },
+      {
+        name: 'getAvailableGroups',
+        description: 'Sinov darslari uchun bo\'sh o\'rinli guruhlarni tekshirish',
+        parameters: {
+          type: 'object',
+          properties: {
+            branchId: { type: 'string' },
+            courseId: { type: 'string' },
+          },
+        },
+      },
+      {
+        name: 'createLead',
+        description: 'Yangi qiziquvchi o\'quvchini ro\'yxatga olish yoki yangilash',
+        parameters: {
+          type: 'object',
+          properties: {
+            fullName: { type: 'string' },
+            phone: { type: 'string' },
+            preferredCourse: { type: 'string' },
+            preferredBranchId: { type: 'string' },
+            notes: { type: 'string' },
+          },
+          required: ['fullName'],
+        },
+      },
+      {
+        name: 'createTrialBooking',
+        description: 'O\'quvchi uchun sinov darsini qat\'iy sig\'im tekshiruvi bilan bron qilish',
+        parameters: {
+          type: 'object',
+          properties: {
+            leadId: { type: 'string' },
+            groupId: { type: 'string' },
+            bookingDate: { type: 'string' },
+            notes: { type: 'string' },
+          },
+          required: ['leadId', 'groupId', 'bookingDate'],
+        },
+      },
+    ];
+  }
+
+  // Execute deterministic tool calls
+  async executeTool(toolName: string, args: any = {}) {
+    switch (toolName) {
+      case 'getCourses':
+        return this.coursesService.getVerifiedCatalog();
+      case 'getBranches':
+        return this.branchesService.findAll(true);
+      case 'getAvailableGroups':
+        return this.groupsService.findAvailableForTrial(args.branchId, args.courseId);
+      case 'createLead':
+        return this.leadsService.upsertLead(args);
+      case 'createTrialBooking':
+        return this.bookingsService.createBooking(args);
+      default:
+        throw new Error(`Noma'lum funksiya/tool: ${toolName}`);
+    }
+  }
+
   // Orchestrator with Zero-Hallucination Policy and Tool Calling
   async processUserMessage(input: AiProcessInput): Promise<AiProcessOutput> {
     const { leadId, userMessage } = input;
     const conversation = input.conversationId
       ? await this.conversationsService.findOne(input.conversationId)
       : await this.conversationsService.findOrCreateForLead(leadId);
+
+    // Direct Tool Execution if requested
+    if (input.toolCall) {
+      try {
+        const result = await this.executeTool(input.toolCall.name, input.toolCall.args);
+        const reply = `Funksiya (${input.toolCall.name}) muvaffaqiyatli bajarildi.`;
+        await this.conversationsService.addMessage({
+          conversationId: conversation.id,
+          senderType: MessageSender.AI,
+          content: reply,
+          metadata: { toolCall: input.toolCall.name, result },
+        });
+        return {
+          reply,
+          actionTaken: input.toolCall.name,
+          toolResult: result,
+          needsHumanHandoff: false,
+        };
+      } catch (err: any) {
+        this.logger.error(`Tool ${input.toolCall.name} bajarishda xato:`, err.message);
+        const errorReply = `Amalni bajarib bo'lmadi: ${err.message}`;
+        await this.conversationsService.addMessage({
+          conversationId: conversation.id,
+          senderType: MessageSender.AI,
+          content: errorReply,
+        });
+        return {
+          reply: errorReply,
+          actionTaken: `${input.toolCall.name}_FAILED`,
+          needsHumanHandoff: false,
+        };
+      }
+    }
 
     // Save incoming user message
     await this.conversationsService.addMessage({

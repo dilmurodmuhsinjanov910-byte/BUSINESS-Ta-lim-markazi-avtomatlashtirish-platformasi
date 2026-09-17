@@ -87,6 +87,34 @@ export class BookingsService {
       throw new BadRequestException('Ushbu guruh arxivlangan.');
     }
 
+    const bookingDate = new Date(dto.bookingDate);
+    if (isNaN(bookingDate.getTime())) {
+      throw new BadRequestException("Noto'g'ri sana kiritildi.");
+    }
+
+    const startOfDay = new Date(bookingDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(bookingDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Count existing active trial bookings for this group on the same day
+    const activeDateBookings = await this.prisma.trialBooking.count({
+      where: {
+        groupId: dto.groupId,
+        bookingDate: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+        status: { in: [BookingStatus.BOOKED, BookingStatus.CONFIRMED] },
+      },
+    });
+
+    if (group.currentStudents + activeDateBookings >= group.maxStudents) {
+      throw new BadRequestException(
+        `Ushbu guruh va tanlangan sana uchun barcha o'rinlar band qilingan (${group.currentStudents + activeDateBookings}/${group.maxStudents} ta). Sinov darsini bron qilish mumkin emas.`,
+      );
+    }
+
     // 3. De-duplication check: check if lead already has active trial booking for this group
     const activeBooking = await this.prisma.trialBooking.findFirst({
       where: {
@@ -102,7 +130,6 @@ export class BookingsService {
       );
     }
 
-    const bookingDate = new Date(dto.bookingDate);
     const timeSlot = `${group.startTime} - ${group.endTime}`;
 
     // 4. Create Trial Booking
