@@ -221,5 +221,12 @@ export const crmApi = {
     fetchApi<any>('/payments/direct-pay', { method: 'POST', body: JSON.stringify(dto) }),
   notifyDebtor: (leadId: string) =>
     fetchApi<any>(`/payments/notify-debtor/${leadId}`, { method: 'POST' }),
+
+  // Teachers Management
+  getTeachers: () => fetchApi<any[]>('/teachers'),
+  createTeacher: (dto: { fullName: string; phone: string; email?: string; password?: string; branchId?: string }) =>
+    fetchApi<any>('/teachers', { method: 'POST', body: JSON.stringify(dto) }),
+  deleteTeacher: (id: string) =>
+    fetchApi<any>(`/teachers/${id}`, { method: 'DELETE' }),
 };
 

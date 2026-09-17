@@ -21,6 +21,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { GradesModule } from './grades/grades.module';
+import { TeachersModule } from './teachers/teachers.module';
 import { APP_GUARD } from '@nestjs/core';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
 
@@ -51,6 +52,7 @@ import { RateLimitGuard } from './common/guards/rate-limit.guard';
     EnrollmentsModule,
     AttendanceModule,
     GradesModule,
+    TeachersModule,
   ],
   providers: [
     {
