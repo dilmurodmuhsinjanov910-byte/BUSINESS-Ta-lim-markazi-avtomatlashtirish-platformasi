@@ -18,6 +18,9 @@ import { TelegramModule } from './telegram/telegram.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AuditModule } from './audit/audit.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { EnrollmentsModule } from './enrollments/enrollments.module';
+import { AttendanceModule } from './attendance/attendance.module';
+import { GradesModule } from './grades/grades.module';
 
 @Module({
   imports: [
@@ -43,6 +46,9 @@ import { AnalyticsModule } from './analytics/analytics.module';
     PaymentsModule,
     AuditModule,
     AnalyticsModule,
+    EnrollmentsModule,
+    AttendanceModule,
+    GradesModule,
   ],
 })
 export class AppModule {}

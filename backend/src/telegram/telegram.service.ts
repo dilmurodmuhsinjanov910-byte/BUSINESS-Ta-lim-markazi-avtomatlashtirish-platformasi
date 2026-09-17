@@ -127,7 +127,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         [Markup.button.contactRequest('📱 Telefon raqamni ulashish')],
         ['📚 Kurslar va narxlar', '📍 Filiallarimiz'],
         ['🎁 Bepul sinov darsiga yozilish', '❓ Savollaringiz bormi?'],
-        ['📞 Operator bilan bog\'lanish'],
+        ['📱 Mening kabinetim', '📞 Operator bilan bog\'lanish'],
       ]).resize();
 
       await ctx.reply(welcomeText, keyboard);
@@ -189,6 +189,56 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const faqMenu = this.getFaqMenu();
       await ctx.reply(faqMenu.text, { parse_mode: 'Markdown', ...faqMenu.keyboard }).catch(async () => {
         await ctx.reply(faqMenu.text, faqMenu.keyboard);
+      });
+    });
+
+    // Handle student mini app commands and button
+    const replyStudentCabinet = async (ctx: any) => {
+      const telegramId = String(ctx.from.id);
+      const baseUrl = this.configService.get<string>('WEBAPP_BASE_URL') || 'http://localhost:3000';
+      const webAppUrl = `${baseUrl}/student?telegramId=${telegramId}`;
+      const isHttps = webAppUrl.startsWith('https://');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          isHttps
+            ? Markup.button.webApp('📱 Mening kabinetim (Mini App)', webAppUrl)
+            : Markup.button.url('📱 Mening kabinetim (Brauzerda)', webAppUrl),
+        ],
+      ]);
+
+      const text =
+        `🎓 **O'quvchi Kabineti (Telegram Mini App)**\n\n` +
+        `Kurslaringiz, dars jadvali, davomat ko'rsatkichlari va o'qituvchingiz qo'ygan baholarni ko'rish uchun quyidagi tugmani bosing:`;
+
+      await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard }).catch(async () => {
+        await ctx.reply(`${text}\n\nKabinet ssilkasi: ${webAppUrl}`);
+      });
+    };
+
+    this.bot.hears('📱 Mening kabinetim', replyStudentCabinet);
+    this.bot.command(['app', 'cabinet', 'mening_kabinetim', 'talaba'], replyStudentCabinet);
+
+    // Handle teacher journal command
+    this.bot.command(['teacher', 'ustoz', 'jurnal'], async (ctx) => {
+      const baseUrl = this.configService.get<string>('WEBAPP_BASE_URL') || 'http://localhost:3000';
+      const webAppUrl = `${baseUrl}/teacher`;
+      const isHttps = webAppUrl.startsWith('https://');
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          isHttps
+            ? Markup.button.webApp("👨‍🏫 O'qituvchi jurnali (Mini App)", webAppUrl)
+            : Markup.button.url("👨‍🏫 O'qituvchi jurnali (Brauzerda)", webAppUrl),
+        ],
+      ]);
+
+      const text =
+        `👨‍🏫 **O'qituvchi Jurnali (Telegram Mini App)**\n\n` +
+        `Guruhlar bo'yicha talabalar ro'yxatini ko'rish, kunlik davomatni belgilash va baholarni to'g'ridan-to'g'ri Admin Panelga kiritish uchun quyidagi tugmani bosing:`;
+
+      await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard }).catch(async () => {
+        await ctx.reply(`${text}\n\nJurnal ssilkasi: ${webAppUrl}`);
       });
     });
 
@@ -614,6 +664,49 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         return true;
       } catch (err: any) {
         this.logger.error(`Telegramga xabar yuborishda xato [${telegramId}]: ${err.message}`);
+        return false;
+      }
+    }
+    return false;
+  }
+
+  // Send interactive enrollment notification with Mini App button
+  async sendEnrollmentNotification(
+    telegramId: string,
+    courseName: string,
+    groupName: string,
+    schedule: string,
+    webAppUrl: string,
+  ) {
+    const text =
+      `🎉 **Tabriklaymiz! Siz kursga muvaffaqiyatli qabul qilindingiz!**\n\n` +
+      `📚 **Kurs:** ${courseName}\n` +
+      `👥 **Guruh:** ${groupName}\n` +
+      `🗓 **Dars vaqti:** ${schedule}\n\n` +
+      `📱 Shaxsiy talaba kabinetingizga (Telegram Mini App) kirish uchun quyidagi tugmani bosing. Unda dars jadvali, oylik to'lov, davomatingiz va ustozingiz qo'ygan baholarni ko'rishingiz mumkin:`;
+
+    if (this.bot) {
+      try {
+        const isHttps = webAppUrl.startsWith('https://');
+        const keyboard = Markup.inlineKeyboard([
+          [
+            isHttps
+              ? Markup.button.webApp('📱 Mening kabinetim (Mini App)', webAppUrl)
+              : Markup.button.url('📱 Mening kabinetim (Brauzerda)', webAppUrl),
+          ],
+        ]);
+
+        await this.bot.telegram
+          .sendMessage(telegramId, text, {
+            parse_mode: 'Markdown',
+            ...keyboard,
+          })
+          .catch(async () => {
+            await this.bot!.telegram.sendMessage(telegramId, `${text}\n\nKabinet ssilkasi: ${webAppUrl}`);
+          });
+        return true;
+      } catch (err: any) {
+        this.logger.error(`sendEnrollmentNotification xatosi [${telegramId}]: ${err.message}`);
         return false;
       }
     }
