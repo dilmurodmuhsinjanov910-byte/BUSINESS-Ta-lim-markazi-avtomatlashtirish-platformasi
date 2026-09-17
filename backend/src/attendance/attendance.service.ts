@@ -1,10 +1,16 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { TelegramService } from '../telegram/telegram.service';
 import { RecordAttendanceDto } from './dto/record-attendance.dto';
 
 @Injectable()
 export class AttendanceService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(AttendanceService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private telegramService: TelegramService,
+  ) {}
 
   async recordAttendance(dto: RecordAttendanceDto) {
     const group = await this.prisma.group.findUnique({
@@ -80,6 +86,16 @@ export class AttendanceService {
           },
         });
         results.push(created);
+      }
+
+      // Send real-time attendance alert if student has Telegram ID
+      const savedRecord = existing ? results[results.length - 1] : results[results.length - 1];
+      const lead = savedRecord?.enrollment?.lead;
+      if (lead?.telegramId) {
+        const dateStr = targetDate.toISOString().split('T')[0];
+        this.telegramService
+          .sendAttendanceAlert(lead.telegramId, lead.fullName, item.status, group.name, dateStr, item.notes)
+          .catch((err: any) => this.logger.warn(`Davomat xabarnomasi yuborilmadi: ${err.message}`));
       }
     }
 
