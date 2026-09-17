@@ -4,6 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import { LeadsService } from '../leads/leads.service';
 import { AiService } from '../ai/ai.service';
 import { ConversationsService } from '../conversations/conversations.service';
+import { BookingsService } from '../bookings/bookings.service';
+import { GroupsService } from '../groups/groups.service';
 import { LeadStatus } from '@prisma/client';
 
 describe('TelegramService', () => {
@@ -51,6 +53,44 @@ describe('TelegramService', () => {
     registerTelegramDispatcher: jest.fn(),
   };
 
+  const mockBookingRecord = {
+    id: 'booking-1',
+    leadId: 'lead-tg-1',
+    groupId: 'g-1',
+    bookingDate: new Date(),
+    group: {
+      id: 'g-1',
+      name: 'ENG-101',
+      timeSlot: '10:00 - 11:20',
+      daysOfWeek: 'Du-Chor-Jum',
+      course: { name: 'General English' },
+    },
+    branch: {
+      id: 'b-1',
+      name: 'Chilonzor filiali',
+      address: 'Chilonzor metrosi',
+    },
+  };
+
+  const mockBookingsService = {
+    createBooking: jest.fn().mockResolvedValue(mockBookingRecord),
+    findOne: jest.fn().mockResolvedValue(mockBookingRecord),
+  };
+
+  const mockGroupsService = {
+    findAvailableForTrial: jest.fn().mockResolvedValue([
+      {
+        id: 'g-1',
+        name: 'ENG-101',
+        courseName: 'General English',
+        branchName: 'Chilonzor filiali',
+        daysOfWeek: 'Du-Chor-Jum',
+        timeSlot: '10:00 - 11:20',
+        availableSeats: 4,
+      },
+    ]),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -62,6 +102,8 @@ describe('TelegramService', () => {
         { provide: LeadsService, useValue: mockLeadsService },
         { provide: AiService, useValue: mockAiService },
         { provide: ConversationsService, useValue: mockConversationsService },
+        { provide: BookingsService, useValue: mockBookingsService },
+        { provide: GroupsService, useValue: mockGroupsService },
       ],
     }).compile();
 
@@ -98,13 +140,50 @@ describe('TelegramService', () => {
     });
   });
 
-  describe('Trial lesson inquiries', () => {
-    it('should list available groups for trial lesson', async () => {
+  describe('Trial lesson inquiries & 1-Tap Booking', () => {
+    it('should list available groups with inline buttons', async () => {
       const result = await service.handleTrialRequest('123456789', 'Anvar Qodirov');
 
       expect(mockAiService.executeTool).toHaveBeenCalledWith('getAvailableGroups', {});
-      expect(result.reply).toContain('ENG-101');
+      expect(result.reply).toContain('General English');
       expect((result.groups as any[]).length).toBe(1);
+      expect(result.inlineKeyboard).toBeDefined();
+    });
+
+    it('should confirm 1-tap trial booking and save to database', async () => {
+      const result = await service.handleConfirmTrialBooking('123456789', 'Anvar Qodirov', 'g-1');
+
+      expect(mockBookingsService.createBooking).toHaveBeenCalledWith(
+        expect.objectContaining({
+          leadId: 'lead-tg-1',
+          groupId: 'g-1',
+        }),
+      );
+      expect(result.success).toBe(true);
+      expect(result.reply).toContain('muvaffaqiyatli sinov darsiga yozildingiz');
+      expect(mockConversationsService.addMessage).toHaveBeenCalled();
+    });
+  });
+
+  describe('FAQ Menu & Instant Inline Answers', () => {
+    it('should return interactive FAQ menu with category buttons', () => {
+      const menu = service.getFaqMenu();
+      expect(menu.text).toContain('Eng ko\'p beriladigan savollar');
+      expect(menu.keyboard).toBeDefined();
+    });
+
+    it('should return verified pricing answer for pricing FAQ', async () => {
+      const res = await service.handleFaqAnswer('123456789', 'Anvar Qodirov', 'pricing');
+      expect(res.reply).toContain('General English');
+      expect(res.reply).toContain('450,000');
+      expect(res.action).toBe('FAQ_PRICING');
+    });
+
+    it('should return verified schedule answer for schedule FAQ', async () => {
+      const res = await service.handleFaqAnswer('123456789', 'Anvar Qodirov', 'schedule');
+      expect(res.reply).toContain('Toq kunlar');
+      expect(res.reply).toContain('09:00');
+      expect(res.action).toBe('FAQ_SCHEDULE');
     });
   });
 
