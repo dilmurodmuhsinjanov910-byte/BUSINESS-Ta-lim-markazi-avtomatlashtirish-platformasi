@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Body, Param, Query, UseGuards, Request, ForbiddenException } from '@nestjs/common';
 import { LeadsService, CreateOrUpdateLeadDto } from './leads.service';
+import { RateLimit } from '../common/guards/rate-limit.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { LeadStatus, ScoreTier, LeadSource, ActivityType, Role } from '@prisma/client';
@@ -47,6 +48,7 @@ export class LeadsController {
 
   // Public or internal lead capture endpoint (e.g. from landing page or Telegram bot)
   @Post()
+  @RateLimit(20, 60)
   async createOrUpdate(@Body() dto: CreateOrUpdateLeadDto) {
     return this.leadsService.upsertLead(dto);
   }

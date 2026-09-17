@@ -33,6 +33,7 @@ describe('Enrollment, Attendance & Grades Suite', () => {
       update: jest.fn(),
     },
     enrollment: {
+      count: jest.fn(),
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       findMany: jest.fn(),
@@ -154,13 +155,86 @@ describe('Enrollment, Attendance & Grades Suite', () => {
       mockPrisma.lead.findUnique.mockResolvedValue({ id: 'lead-1' });
       mockPrisma.group.findUnique.mockResolvedValue({
         id: 'group-1',
+        capacity: 10,
         maxStudents: 10,
         currentStudents: 10,
       });
 
       await expect(
         enrollmentsService.createEnrollment({ leadId: 'lead-1', groupId: 'group-1' }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow("Guruh sig'imi to'lgan");
+    });
+
+    it("should reject enrollment via create() if group capacity is reached (currentStudents >= group.capacity)", async () => {
+      mockPrisma.lead.findUnique.mockResolvedValue({ id: 'lead-1' });
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'group-1',
+        capacity: 12,
+        maxStudents: 12,
+        currentStudents: 12,
+      });
+
+      await expect(
+        enrollmentsService.create({ leadId: 'lead-1', groupId: 'group-1' }),
+      ).rejects.toThrow(new BadRequestException("Guruh sig'imi to'lgan"));
+    });
+
+    it("should reject enrollment via create() if active enrollment count from DB reaches group.capacity", async () => {
+      mockPrisma.lead.findUnique.mockResolvedValue({ id: 'lead-1' });
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'group-1',
+        capacity: 8,
+        maxStudents: 8,
+        currentStudents: 3, // Stale count in group table
+      });
+      mockPrisma.enrollment.count.mockResolvedValue(8);
+
+      await expect(
+        enrollmentsService.create({ leadId: 'lead-1', groupId: 'group-1' }),
+      ).rejects.toThrow(new BadRequestException("Guruh sig'imi to'lgan"));
+    });
+
+    it("should reject enrollment if group status is FULL", async () => {
+      mockPrisma.lead.findUnique.mockResolvedValue({ id: 'lead-1' });
+      mockPrisma.group.findUnique.mockResolvedValue({
+        id: 'group-1',
+        capacity: 15,
+        maxStudents: 15,
+        currentStudents: 5,
+        status: 'FULL',
+      });
+
+      await expect(
+        enrollmentsService.create({ leadId: 'lead-1', groupId: 'group-1' }),
+      ).rejects.toThrow(new BadRequestException("Guruh sig'imi to'lgan"));
+    });
+
+    it("should reject enrollment if concurrent enrollment fills group inside atomic transaction", async () => {
+      mockPrisma.lead.findUnique.mockResolvedValue({ id: 'lead-1' });
+      // Pre-transaction check passes (currentStudents = 9, capacity = 10)
+      mockPrisma.group.findUnique
+        .mockResolvedValueOnce({
+          id: 'group-1',
+          capacity: 10,
+          maxStudents: 10,
+          currentStudents: 9,
+          status: 'RECRUITING',
+          course: { monthlyPrice: 400000 },
+        })
+        // Inside transaction, concurrent enrollment filled the group
+        .mockResolvedValueOnce({
+          id: 'group-1',
+          capacity: 10,
+          maxStudents: 10,
+          currentStudents: 10,
+          status: 'FULL',
+        });
+      mockPrisma.enrollment.findFirst.mockResolvedValue(null);
+      mockPrisma.enrollment.count.mockResolvedValueOnce(9).mockResolvedValueOnce(10);
+
+      await expect(
+        enrollmentsService.create({ leadId: 'lead-1', groupId: 'group-1' }),
+      ).rejects.toThrow(new BadRequestException("Guruh sig'imi to'lgan"));
     });
 
     it('should reject enrollment if student is already actively enrolled', async () => {

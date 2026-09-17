@@ -2,12 +2,9 @@ import { Injectable, BadRequestException, NotFoundException, ForbiddenException 
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingStatus, LeadStatus, ReminderType, ReminderStatus, GroupStatus, Role } from '@prisma/client';
 
-export interface CreateBookingDto {
-  leadId: string;
-  groupId: string;
-  bookingDate: string | Date; // ISO date string or Date
-  notes?: string;
-}
+import { CreateBookingDto } from './dto/create-booking.dto';
+
+export { CreateBookingDto };
 
 @Injectable()
 export class BookingsService {

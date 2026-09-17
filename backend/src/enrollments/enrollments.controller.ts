@@ -14,7 +14,7 @@ export class EnrollmentsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.OPERATOR, Role.OWNER)
   async createEnrollment(@Body() dto: CreateEnrollmentDto, @Request() req?: any) {
-    return this.enrollmentsService.createEnrollment(dto, req?.user?.id);
+    return this.enrollmentsService.create(dto, req?.user?.id);
   }
 
   @Get()
