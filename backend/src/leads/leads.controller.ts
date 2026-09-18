@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Put, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, UseGuards, Request, ForbiddenException } from '@nestjs/common';
 import { LeadsService, CreateOrUpdateLeadDto } from './leads.service';
+import { RateLimit } from '../common/guards/rate-limit.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
-import { LeadStatus, ScoreTier, LeadSource, ActivityType } from '@prisma/client';
+import { LeadStatus, ScoreTier, LeadSource, ActivityType, Role } from '@prisma/client';
 
 @Controller('leads')
 export class LeadsController {
@@ -11,23 +12,43 @@ export class LeadsController {
   @Get()
   @UseGuards(JwtAuthGuard)
   async findAll(
+    @Request() req: any,
     @Query('status') status?: LeadStatus,
     @Query('scoreTier') scoreTier?: ScoreTier,
     @Query('branchId') branchId?: string,
     @Query('source') source?: LeadSource,
     @Query('search') search?: string,
   ) {
-    return this.leadsService.findAll({ status, scoreTier, branchId, source, search });
+    const user = req.user;
+    const effectiveBranchId =
+      user && user.role !== Role.SUPER_ADMIN && user.role !== Role.OWNER && user.branchId
+        ? user.branchId
+        : branchId;
+
+    return this.leadsService.findAll({ status, scoreTier, branchId: effectiveBranchId, source, search });
   }
 
   @Get(':id')
   @UseGuards(JwtAuthGuard)
-  async findOne(@Param('id') id: string) {
-    return this.leadsService.findOne(id);
+  async findOne(@Param('id') id: string, @Request() req: any) {
+    const lead = await this.leadsService.findOne(id);
+    const user = req.user;
+    if (
+      user &&
+      user.role !== Role.SUPER_ADMIN &&
+      user.role !== Role.OWNER &&
+      user.branchId &&
+      lead.preferredBranchId &&
+      lead.preferredBranchId !== user.branchId
+    ) {
+      throw new ForbiddenException('Siz faqat o\'z filialingizga tegishli leadlarni ko\'ra olasiz!');
+    }
+    return lead;
   }
 
   // Public or internal lead capture endpoint (e.g. from landing page or Telegram bot)
   @Post()
+  @RateLimit(20, 60)
   async createOrUpdate(@Body() dto: CreateOrUpdateLeadDto) {
     return this.leadsService.upsertLead(dto);
   }

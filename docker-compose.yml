@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: education_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_secure_password
+      POSTGRES_DB: education_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: education_backend
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      PORT: 4000
+      DATABASE_URL: "postgresql://postgres:postgres_secure_password@postgres:5432/education_db?schema=public"
+      JWT_SECRET: "business-v1-super-secret-jwt-key-2026"
+      JWT_EXPIRES_IN: "7d"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-mock_token}"
+      AI_API_KEY: "${AI_API_KEY:-mock_key}"
+      AI_MODEL: "gpt-4o-mini"
+    ports:
+      - "4000:4000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: education_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: "http://backend:4000/api"
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:

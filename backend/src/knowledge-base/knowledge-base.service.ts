@@ -2,11 +2,30 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ArticleStatus } from '@prisma/client';
 
-export interface CreateArticleDto {
+import { IsNotEmpty, IsString, IsOptional, IsEnum, MaxLength } from 'class-validator';
+
+export class CreateArticleDto {
+  @IsNotEmpty({ message: 'Maqola sarlavhasi kiritilishi shart' })
+  @IsString({ message: "Maqola sarlavhasi satr bo'lishi kerak" })
+  @MaxLength(200)
   title: string;
+
+  @IsNotEmpty({ message: 'Kategoriya kiritilishi shart' })
+  @IsString({ message: "Kategoriya satr bo'lishi kerak" })
+  @MaxLength(100)
   category: string;
+
+  @IsNotEmpty({ message: 'Maqola mazmuni kiritilishi shart' })
+  @IsString({ message: "Maqola mazmuni satr bo'lishi kerak" })
   content: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
   tags?: string;
+
+  @IsOptional()
+  @IsEnum(ArticleStatus)
   status?: ArticleStatus;
 }
 
@@ -84,17 +103,43 @@ export class KnowledgeBaseService {
   // Soft delete / archive
   async archive(id: string) {
     await this.findOne(id);
-    return this.prisma.knowledgeBaseArticle.update({
+    const updated = await this.prisma.knowledgeBaseArticle.update({
       where: { id },
       data: { status: ArticleStatus.ARCHIVED },
     });
+
+    if (this.prisma.auditLog?.create) {
+      await this.prisma.auditLog.create({
+        data: {
+          entityType: 'KnowledgeBase',
+          entityId: id,
+          action: 'ARCHIVE',
+          reason: 'Maqola arxivlandi va AI bazasidan chiqarildi',
+        },
+      }).catch(() => {});
+    }
+
+    return updated;
   }
 
   async publish(id: string) {
     await this.findOne(id);
-    return this.prisma.knowledgeBaseArticle.update({
+    const updated = await this.prisma.knowledgeBaseArticle.update({
       where: { id },
       data: { status: ArticleStatus.PUBLISHED },
     });
+
+    if (this.prisma.auditLog?.create) {
+      await this.prisma.auditLog.create({
+        data: {
+          entityType: 'KnowledgeBase',
+          entityId: id,
+          action: 'PUBLISH',
+          reason: 'Maqola nashr qilindi va AI bazasiga kiritildi',
+        },
+      }).catch(() => {});
+    }
+
+    return updated;
   }
 }

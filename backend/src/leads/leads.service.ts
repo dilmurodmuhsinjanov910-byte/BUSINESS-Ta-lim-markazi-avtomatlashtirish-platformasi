@@ -2,31 +2,31 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { LeadStatus, LeadSource, ScoreTier, ActivityType } from '@prisma/client';
 
-export interface CreateOrUpdateLeadDto {
-  fullName: string;
-  phone: string;
-  telegramId?: string;
-  telegramUsername?: string;
-  source?: LeadSource;
-  preferredLanguage?: string;
-  preferredCourse?: string;
-  preferredBranchId?: string;
-  notes?: string;
-  initialScoreDelta?: number;
-}
+import { CreateOrUpdateLeadDto } from './dto/create-or-update-lead.dto';
+
+export { CreateOrUpdateLeadDto };
 
 @Injectable()
 export class LeadsService {
   constructor(private prisma: PrismaService) {}
 
   // Phone normalizer to ensure consistent deduplication (+998901234567 format)
-  normalizePhone(phone: string): string {
+  normalizePhone(phone?: string): string {
+    if (!phone) return '';
     const cleaned = phone.replace(/[^0-9+]/g, '');
-    if (cleaned.startsWith('998') && !cleaned.startsWith('+')) {
-      return `+${cleaned}`;
+    if (cleaned.startsWith('+998')) {
+      return cleaned.slice(0, 13);
     }
-    if (cleaned.length === 9) {
+    if (cleaned.startsWith('998') && !cleaned.startsWith('+')) {
+      return `+${cleaned.slice(0, 12)}`;
+    }
+    // Only format as Uzbek mobile number if 9 digits AND starts with valid operator code
+    const uzbekMobileCodes = ['90', '91', '93', '94', '95', '97', '98', '99', '33', '88', '77', '50', '20'];
+    if (cleaned.length === 9 && uzbekMobileCodes.some((code) => cleaned.startsWith(code))) {
       return `+998${cleaned}`;
+    }
+    if (phone.startsWith('+')) {
+      return phone.trim();
     }
     return cleaned;
   }
@@ -39,17 +39,23 @@ export class LeadsService {
 
   // De-duplication core logic: checks both phone and telegramId
   async upsertLead(dto: CreateOrUpdateLeadDto, createdById?: string) {
-    const normalizedPhone = this.normalizePhone(dto.phone);
+    const rawPhone = dto.phone ? dto.phone.trim() : '';
+    const normalizedPhone = rawPhone ? this.normalizePhone(rawPhone) : '';
+
+    const orConditions: any[] = [];
+    if (normalizedPhone && !normalizedPhone.startsWith('tg_')) {
+      orConditions.push({ phone: normalizedPhone });
+    }
+    if (dto.telegramId) {
+      orConditions.push({ telegramId: dto.telegramId });
+    }
 
     // Look for existing lead by phone or telegramId
-    const existing = await this.prisma.lead.findFirst({
-      where: {
-        OR: [
-          { phone: normalizedPhone },
-          ...(dto.telegramId ? [{ telegramId: dto.telegramId }] : []),
-        ],
-      },
-    });
+    const existing = orConditions.length > 0
+      ? await this.prisma.lead.findFirst({
+          where: { OR: orConditions },
+        })
+      : null;
 
     if (existing) {
       // De-duplication hit: Do not duplicate, update existing lead and record activity
@@ -57,17 +63,27 @@ export class LeadsService {
       newScore = Math.min(100, Math.max(0, newScore));
       const newTier = this.calculateTier(newScore);
 
+      // Don't overwrite real phone with a placeholder
+      const phoneToSet =
+        normalizedPhone && !normalizedPhone.startsWith('tg_')
+          ? normalizedPhone
+          : existing.phone;
+
       const updated = await this.prisma.lead.update({
         where: { id: existing.id },
         data: {
           fullName: dto.fullName || existing.fullName,
-          phone: normalizedPhone,
+          phone: phoneToSet,
+          age: dto.age !== undefined ? dto.age : existing.age,
           telegramId: dto.telegramId || existing.telegramId,
           telegramUsername: dto.telegramUsername || existing.telegramUsername,
           preferredLanguage: dto.preferredLanguage || existing.preferredLanguage,
           preferredCourse: dto.preferredCourse || existing.preferredCourse,
           preferredBranchId: dto.preferredBranchId || existing.preferredBranchId,
-          notes: dto.notes ? `${existing.notes ? existing.notes + ' | ' : ''}${dto.notes}` : existing.notes,
+          notes: (() => {
+            const merged = dto.notes ? `${existing.notes ? existing.notes + ' | ' : ''}${dto.notes}` : existing.notes;
+            return merged && merged.length > 2000 ? merged.slice(-2000) : merged;
+          })(),
           score: newScore,
           scoreTier: newTier,
         },
@@ -95,7 +111,8 @@ export class LeadsService {
     const lead = await this.prisma.lead.create({
       data: {
         fullName: dto.fullName,
-        phone: normalizedPhone,
+        phone: normalizedPhone || (dto.telegramId ? `tg_${dto.telegramId}` : 'NOMA\'LUM'),
+        age: dto.age,
         telegramId: dto.telegramId,
         telegramUsername: dto.telegramUsername,
         source: dto.source || LeadSource.TELEGRAM,
@@ -243,6 +260,21 @@ export class LeadsService {
         createdById: userId,
       },
     });
+
+    // Record system audit log
+    if (this.prisma.auditLog?.create) {
+      await this.prisma.auditLog.create({
+        data: {
+          entityType: 'Lead',
+          entityId: id,
+          action: 'STATUS_CHANGE',
+          changedById: userId,
+          oldValue: JSON.stringify({ status: lead.status }),
+          newValue: JSON.stringify({ status: newStatus, lostReason }),
+          reason: newStatus === LeadStatus.LOST ? `Yo'qotish sababi: ${lostReason}` : `Status o'zgartirildi: ${lead.status} -> ${newStatus}`,
+        },
+      }).catch(() => {});
+    }
 
     return updated;
   }

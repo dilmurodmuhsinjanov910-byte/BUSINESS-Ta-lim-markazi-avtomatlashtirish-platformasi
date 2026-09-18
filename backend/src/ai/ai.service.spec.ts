@@ -49,8 +49,12 @@ describe('AiService', () => {
     ]),
   };
 
-  const mockLeadsService = {};
-  const mockBookingsService = {};
+  const mockLeadsService = {
+    upsertLead: jest.fn().mockResolvedValue({ lead: { id: 'lead-created', score: 50 }, isDuplicate: false }),
+  };
+  const mockBookingsService = {
+    createBooking: jest.fn().mockResolvedValue({ id: 'booking-created' }),
+  };
   const mockKbService = {
     getPublishedArticles: jest.fn().mockResolvedValue([]),
   };
@@ -116,7 +120,20 @@ describe('AiService', () => {
 
       expect(result.reply).toContain('General English');
       expect(result.reply).toContain('450,000 UZS/oy');
-      expect(result.actionTaken).toBe('GET_COURSES');
+      expect(['GET_COURSES', 'SIMILARITY_MATCH']).toContain(result.actionTaken);
+    });
+
+    it('should route to operator when similarity is below 85%', async () => {
+      const result = await service.processUserMessage({
+        leadId: 'lead-1',
+        conversationId: 'conv-1',
+        userMessage: 'Kosmik kemada dars o\'tish mumkinmi?',
+      });
+
+      expect(result.reply).toContain("Bu masala bilan operator bilan gaplashganingiz ma'qul");
+      expect(result.needsHumanHandoff).toBe(true);
+      expect(result.handoffReason).toBe('LOW_CONFIDENCE');
+      expect(result.similarityScore).toBeLessThan(0.85);
     });
 
     it('should trigger human handoff when user asks for operator', async () => {
@@ -134,6 +151,63 @@ describe('AiService', () => {
       expect(result.needsHumanHandoff).toBe(true);
       expect(result.handoffReason).toBe('OPERATOR_REQUEST');
       expect(mockConversationsService.triggerHandoff).toHaveBeenCalled();
+    });
+  });
+
+  describe('Function and Tool Calling Engine', () => {
+    it('should expose the 5 required tools with schemas', () => {
+      const tools = service.getTools();
+      expect(tools.length).toBe(5);
+      const names = tools.map((t) => t.name);
+      expect(names).toContain('getCourses');
+      expect(names).toContain('getBranches');
+      expect(names).toContain('getAvailableGroups');
+      expect(names).toContain('createLead');
+      expect(names).toContain('createTrialBooking');
+    });
+
+    it('should execute createLead tool', async () => {
+      const result = await service.executeTool('createLead', {
+        fullName: 'Botir Zokirov',
+        phone: '+998901234567',
+      });
+
+      expect(mockLeadsService.upsertLead).toHaveBeenCalledWith({
+        fullName: 'Botir Zokirov',
+        phone: '+998901234567',
+      });
+      expect((result as any).lead.id).toBe('lead-created');
+    });
+
+    it('should execute createTrialBooking tool', async () => {
+      const result = await service.executeTool('createTrialBooking', {
+        leadId: 'lead-1',
+        groupId: 'g-1',
+        bookingDate: '2026-09-20',
+      });
+
+      expect(mockBookingsService.createBooking).toHaveBeenCalledWith({
+        leadId: 'lead-1',
+        groupId: 'g-1',
+        bookingDate: '2026-09-20',
+      });
+      expect((result as any).id).toBe('booking-created');
+    });
+
+    it('should handle toolCall in processUserMessage', async () => {
+      const result = await service.processUserMessage({
+        leadId: 'lead-1',
+        conversationId: 'conv-1',
+        userMessage: 'Guruhga yozing',
+        toolCall: {
+          name: 'getAvailableGroups',
+          args: { branchId: 'b1' },
+        },
+      });
+
+      expect(result.actionTaken).toBe('getAvailableGroups');
+      expect(result.toolResult).toBeDefined();
+      expect(result.needsHumanHandoff).toBe(false);
     });
   });
 });

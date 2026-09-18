@@ -4,12 +4,16 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { Role, GroupStatus } from '@prisma/client';
+import { CreateGroupDto } from './dto/create-group.dto';
+import { UpdateGroupDto } from './dto/update-group.dto';
 
 @Controller('groups')
 export class GroupsController {
   constructor(private groupsService: GroupsService) {}
 
   @Get()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.OWNER, Role.OPERATOR, Role.TEACHER)
   async findAll(
     @Query('branchId') branchId?: string,
     @Query('courseId') courseId?: string,
@@ -27,6 +31,8 @@ export class GroupsController {
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.OWNER, Role.OPERATOR, Role.TEACHER)
   async findOne(@Param('id') id: string) {
     return this.groupsService.findOne(id);
   }
@@ -34,14 +40,15 @@ export class GroupsController {
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ADMIN)
-  async create(@Body() data: any) {
+  async create(@Body() data: CreateGroupDto) {
     return this.groupsService.create(data);
   }
 
   @Put(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ADMIN)
-  async update(@Param('id') id: string, @Body() data: any) {
+  async update(@Param('id') id: string, @Body() data: UpdateGroupDto) {
     return this.groupsService.update(id, data);
   }
 }
+

@@ -18,6 +18,12 @@ import { TelegramModule } from './telegram/telegram.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AuditModule } from './audit/audit.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { EnrollmentsModule } from './enrollments/enrollments.module';
+import { AttendanceModule } from './attendance/attendance.module';
+import { GradesModule } from './grades/grades.module';
+import { TeachersModule } from './teachers/teachers.module';
+import { APP_GUARD } from '@nestjs/core';
+import { RateLimitGuard } from './common/guards/rate-limit.guard';
 
 @Module({
   imports: [
@@ -43,6 +49,16 @@ import { AnalyticsModule } from './analytics/analytics.module';
     PaymentsModule,
     AuditModule,
     AnalyticsModule,
+    EnrollmentsModule,
+    AttendanceModule,
+    GradesModule,
+    TeachersModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: RateLimitGuard,
+    },
   ],
 })
 export class AppModule {}

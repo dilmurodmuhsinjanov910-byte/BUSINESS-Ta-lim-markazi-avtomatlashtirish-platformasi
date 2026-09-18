@@ -25,19 +25,37 @@ export class ConversationsService {
       }
     }
 
-    // 2. Complaint keywords
-    const complaintKeywords = ['shikoyat', 'noroziman', 'yomon', 'aldov', 'qoniqarsiz', 'pulimni qaytar', 'sudga beraman'];
+    // 2. Complaint keywords & dissatisfaction
+    const complaintKeywords = ['shikoyat', 'noroziman', 'yomon', 'aldov', 'qoniqarsiz', 'pulimni qaytar', 'sudga beraman', 'yoqmadi'];
     for (const kw of complaintKeywords) {
       if (lower.includes(kw)) {
         return { needsHandoff: true, reason: 'COMPLAINT' };
       }
     }
 
-    // 3. Price negotiation / Discounts beyond policy
-    const negotiationKeywords = ['arzonroq qilib bering', 'kelishamizmi', 'yana tushib bering', 'skidka qiling', 'pulim kam'];
+    // 3. Price negotiation / Discounts / Bargaining beyond policy
+    const negotiationKeywords = [
+      'arzonroq',
+      'kelishamizmi',
+      'tushib bering',
+      'skidka',
+      'pulim kam',
+      'qilib bera olasizmi',
+      'chegirma',
+      'aksiya',
+      'narxni tushir',
+    ];
     for (const kw of negotiationKeywords) {
       if (lower.includes(kw)) {
         return { needsHandoff: true, reason: 'PRICE_NEGOTIATION' };
+      }
+    }
+
+    // 4. Payment issues / Transaction problems
+    const paymentKeywords = ['to\'lovim o\'tmadi', 'karta bo\'yicha muammo', 'pul yechildi', 'to\'lov muammo'];
+    for (const kw of paymentKeywords) {
+      if (lower.includes(kw)) {
+        return { needsHandoff: true, reason: 'PAYMENT_ISSUE' };
       }
     }
 
@@ -82,8 +100,7 @@ export class ConversationsService {
       include: {
         lead: true,
         messages: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
+          orderBy: { createdAt: 'asc' },
         },
       },
       orderBy: [{ updatedAt: 'desc' }],
@@ -150,19 +167,46 @@ export class ConversationsService {
       },
     });
 
+    // Record system audit log
+    if (this.prisma.auditLog?.create) {
+      await this.prisma.auditLog.create({
+        data: {
+          entityType: 'Conversation',
+          entityId: conversationId,
+          action: 'HANDOFF_TRIGGERED',
+          reason: `Operatorga yo'naltirildi: ${reason}`,
+        },
+      }).catch(() => {});
+    }
+
     return updated;
   }
 
   async takeOver(conversationId: string, adminId: string) {
     await this.findOne(conversationId);
 
-    return this.prisma.conversation.update({
+    const updated = await this.prisma.conversation.update({
       where: { id: conversationId },
       data: {
         status: ConversationStatus.ADMIN_HANDLING,
         assignedAdminId: adminId,
       },
     });
+
+    // Record system audit log
+    if (this.prisma.auditLog?.create) {
+      await this.prisma.auditLog.create({
+        data: {
+          entityType: 'Conversation',
+          entityId: conversationId,
+          action: 'ADMIN_TAKEOVER',
+          changedById: adminId,
+          reason: 'Admin suhbatni qo\'lda o\'z zimmasiga oldi',
+        },
+      }).catch(() => {});
+    }
+
+    return updated;
   }
 
   async resolve(conversationId: string, resumeAi = false) {
@@ -177,6 +221,12 @@ export class ConversationsService {
     });
   }
 
+  private onAdminMessageCallback?: (telegramId: string, content: string) => Promise<any>;
+
+  registerTelegramDispatcher(fn: (telegramId: string, content: string) => Promise<any>) {
+    this.onAdminMessageCallback = fn;
+  }
+
   async addMessage(dto: SendMessageDto) {
     const conv = await this.findOne(dto.conversationId);
 
@@ -186,6 +236,11 @@ export class ConversationsService {
       if (trigger.needsHandoff) {
         await this.triggerHandoff(conv.id, trigger.reason!);
       }
+    }
+
+    // If admin is replying, dispatch directly to user's Telegram if available
+    if (dto.senderType === MessageSender.ADMIN && conv.lead?.telegramId && this.onAdminMessageCallback) {
+      await this.onAdminMessageCallback(conv.lead.telegramId, dto.content).catch(() => {});
     }
 
     const message = await this.prisma.message.create({

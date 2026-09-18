@@ -13,6 +13,11 @@ export class ConversationsController {
     return this.conversationsService.findAll(status);
   }
 
+  @Post()
+  async createOrGet(@Body() body: { leadId: string; channel?: string }) {
+    return this.conversationsService.findOrCreateForLead(body.leadId, body.channel || 'TELEGRAM');
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.conversationsService.findOne(id);

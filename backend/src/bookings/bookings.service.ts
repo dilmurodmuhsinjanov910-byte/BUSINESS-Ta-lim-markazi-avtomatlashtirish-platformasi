@@ -2,12 +2,9 @@ import { Injectable, BadRequestException, NotFoundException, ForbiddenException 
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingStatus, LeadStatus, ReminderType, ReminderStatus, GroupStatus, Role } from '@prisma/client';
 
-export interface CreateBookingDto {
-  leadId: string;
-  groupId: string;
-  bookingDate: string | Date; // ISO date string or Date
-  notes?: string;
-}
+import { CreateBookingDto } from './dto/create-booking.dto';
+
+export { CreateBookingDto };
 
 @Injectable()
 export class BookingsService {
@@ -87,6 +84,34 @@ export class BookingsService {
       throw new BadRequestException('Ushbu guruh arxivlangan.');
     }
 
+    const bookingDate = new Date(dto.bookingDate);
+    if (isNaN(bookingDate.getTime())) {
+      throw new BadRequestException("Noto'g'ri sana kiritildi.");
+    }
+
+    const startOfDay = new Date(bookingDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(bookingDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // Count existing active trial bookings for this group on the same day
+    const activeDateBookings = await this.prisma.trialBooking.count({
+      where: {
+        groupId: dto.groupId,
+        bookingDate: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+        status: { in: [BookingStatus.BOOKED, BookingStatus.CONFIRMED] },
+      },
+    });
+
+    if (group.currentStudents + activeDateBookings >= group.maxStudents) {
+      throw new BadRequestException(
+        `Ushbu guruh va tanlangan sana uchun barcha o'rinlar band qilingan (${group.currentStudents + activeDateBookings}/${group.maxStudents} ta). Sinov darsini bron qilish mumkin emas.`,
+      );
+    }
+
     // 3. De-duplication check: check if lead already has active trial booking for this group
     const activeBooking = await this.prisma.trialBooking.findFirst({
       where: {
@@ -102,7 +127,6 @@ export class BookingsService {
       );
     }
 
-    const bookingDate = new Date(dto.bookingDate);
     const timeSlot = `${group.startTime} - ${group.endTime}`;
 
     // 4. Create Trial Booking
@@ -144,6 +168,22 @@ export class BookingsService {
 
     // 6. Schedule Automated Reminders: 24h before and 2h before
     await this.scheduleRemindersForBooking(booking.id, lead.id, bookingDate);
+
+    // Record system audit log
+    if (this.prisma.auditLog?.create) {
+      try {
+        await this.prisma.auditLog.create({
+          data: {
+            entityType: 'TrialBooking',
+            entityId: booking.id,
+            action: 'CREATE_BOOKING',
+            changedById: createdById,
+            newValue: JSON.stringify({ leadId: dto.leadId, groupId: dto.groupId, bookingDate }),
+            reason: 'Yangi sinov darsi bron qilindi',
+          },
+        });
+      } catch (e) {}
+    }
 
     return booking;
   }
@@ -207,17 +247,21 @@ export class BookingsService {
       }
 
       // Record strict audit log
-      await this.prisma.auditLog.create({
-        data: {
-          entityType: 'TrialBooking',
-          entityId: id,
-          action: 'STATUS_REVERSION_ATTENDED_TO_MISSED',
-          changedById: currentUser.id,
-          oldValue: JSON.stringify({ status: oldStatus }),
-          newValue: JSON.stringify({ status: newStatus }),
-          reason,
-        },
-      });
+      if (this.prisma.auditLog?.create) {
+        try {
+          await this.prisma.auditLog.create({
+            data: {
+              entityType: 'TrialBooking',
+              entityId: id,
+              action: 'STATUS_REVERSION_ATTENDED_TO_MISSED',
+              changedById: currentUser.id,
+              oldValue: JSON.stringify({ status: oldStatus }),
+              newValue: JSON.stringify({ status: newStatus }),
+              reason,
+            },
+          });
+        } catch (e) {}
+      }
     }
 
     // Handle cancellation: cancel all pending reminders
@@ -284,6 +328,23 @@ export class BookingsService {
           createdById: currentUser?.id,
         },
       });
+    }
+
+    // Record system audit log
+    if (this.prisma.auditLog?.create) {
+      try {
+        await this.prisma.auditLog.create({
+          data: {
+            entityType: 'TrialBooking',
+            entityId: id,
+            action: `STATUS_CHANGE_${newStatus}`,
+            changedById: currentUser?.id,
+            oldValue: JSON.stringify({ status: oldStatus }),
+            newValue: JSON.stringify({ status: newStatus }),
+            reason: reason || `Sinov darsi holati: ${oldStatus} -> ${newStatus}`,
+          },
+        });
+      } catch (e) {}
     }
 
     return updated;

@@ -144,6 +144,28 @@ enum PaymentMethod {
   BANK_TRANSFER
 }
 
+enum EnrollmentStatus {
+  ACTIVE
+  GRADUATED
+  DROPPED
+  FROZEN
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  EXCUSED
+  LATE
+}
+
+enum GradeType {
+  HOMEWORK
+  CLASSWORK
+  EXAM
+  QUIZ
+}
+
+
 model User {
   id           String    @id @default(cuid())
   email        String    @unique
@@ -151,11 +173,13 @@ model User {
   fullName     String
   role         Role      @default(ADMIN)
   phone        String?
+  telegramId   String?   @unique
   isActive     Boolean   @default(true)
   branchId     String?
   branch       Branch?   @relation(fields: [branchId], references: [id])
   tasks        Task[]
   auditLogs    AuditLog[]
+  teacherMessages TeacherMessage[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 }
@@ -222,6 +246,7 @@ model Group {
   currentStudents Int            @default(0)
   status          GroupStatus    @default(RECRUITING)
   trialBookings   TrialBooking[]
+  enrollments     Enrollment[]
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 }
@@ -230,6 +255,7 @@ model Lead {
   id                String         @id @default(cuid())
   fullName          String
   phone             String
+  age               Int?
   telegramId        String?
   telegramUsername  String?
   source            LeadSource     @default(TELEGRAM)
@@ -247,6 +273,7 @@ model Lead {
   conversations     Conversation[]
   tasks             Task[]
   payments          Payment[]
+  enrollments       Enrollment[]
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
@@ -414,3 +441,68 @@ model AuditLog {
 
   @@index([entityType, entityId])
 }
+
+model Enrollment {
+  id          String           @id @default(cuid())
+  leadId      String
+  lead        Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  groupId     String
+  group       Group            @relation(fields: [groupId], references: [id])
+  status      EnrollmentStatus @default(ACTIVE)
+  monthlyFee  Float
+  enrolledAt  DateTime         @default(now())
+  attendances Attendance[]
+  grades      StudentGrade[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([leadId])
+  @@index([groupId])
+}
+
+model Attendance {
+  id           String           @id @default(cuid())
+  enrollmentId String
+  enrollment   Enrollment       @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  groupId      String
+  date         DateTime
+  status       AttendanceStatus @default(PRESENT)
+  markedById   String?
+  notes        String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([enrollmentId])
+  @@index([groupId, date])
+}
+
+model StudentGrade {
+  id           String     @id @default(cuid())
+  enrollmentId String
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  score        Float
+  maxScore     Float      @default(100)
+  gradeType    GradeType  @default(CLASSWORK)
+  title        String
+  comment      String?
+  date         DateTime   @default(now())
+  markedById   String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([enrollmentId])
+}
+
+model TeacherMessage {
+  id          String   @id @default(cuid())
+  teacherId   String
+  teacher     User     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  senderRole  String   @default("TEACHER") // "TEACHER" | "ADMIN"
+  content     String
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([teacherId])
+  @@index([isRead])
+}
+
