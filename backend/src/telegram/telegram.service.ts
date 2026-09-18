@@ -37,6 +37,11 @@ export function parseNameAndAge(text: string, fallbackName = 'Foydalanuvchi'): {
   return { fullName: name, age };
 }
 
+function escapeTelegramMarkdown(text?: string | null): string {
+  if (!text) return '';
+  return String(text).replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+}
+
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
@@ -678,32 +683,29 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       if (state && (state as any).step === 'AWAITING_TEACHER_ADMIN_MESSAGE') {
         this.userStates.delete(telegramId);
 
-        let teacher = await this.prisma.user.findFirst({
+        const teacher = await this.prisma.user.findFirst({
           where: {
-            OR: [
-              { telegramId },
-              { role: Role.TEACHER },
-            ],
+            telegramId,
+            role: Role.TEACHER,
+            isActive: true,
           },
         });
 
-        if (teacher && !teacher.telegramId) {
-          await this.prisma.user.update({
-            where: { id: teacher.id },
-            data: { telegramId },
-          });
+        if (!teacher) {
+          await ctx.reply(
+            "Kechirasiz, sizning Telegram hisobingiz tizimda faol o'qituvchi sifatida biriktirilmagan. Xabar yuborish uchun ma'muriyat bilan bog'laning.",
+          );
+          return;
         }
 
-        if (teacher) {
-          await this.prisma.teacherMessage.create({
-            data: {
-              teacherId: teacher.id,
-              senderRole: 'TEACHER',
-              content: userText,
-              isRead: false,
-            },
-          });
-        }
+        await this.prisma.teacherMessage.create({
+          data: {
+            teacherId: teacher.id,
+            senderRole: 'TEACHER',
+            content: userText,
+            isRead: false,
+          },
+        });
 
         const confirmTeacherMsg =
           `✅ **Xabaringiz markaz ma'muriyatiga muvaffaqiyatli yetkazildi!**\n\n` +
@@ -715,6 +717,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         });
         return;
       }
+
 
       // Check if user is in AWAITING_NAME_AND_AGE state
       if (state && state.step === 'AWAITING_NAME_AND_AGE' && state.convId) {
@@ -886,13 +889,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     else if (status === 'LATE') statusLabel = '⏰ Darsga kechikib keldi';
     else if (status === 'EXCUSED') statusLabel = 'ℹ️ Darsda sababli qatnashmadi';
 
+    const safeStudent = escapeTelegramMarkdown(studentName);
+    const safeGroup = escapeTelegramMarkdown(groupName);
+    const safeNote = escapeTelegramMarkdown(note);
+
     const text =
       `📋 **Davomat xabarnomasi**\n\n` +
-      `Hurmatli **${studentName}**,\n` +
+      `Hurmatli **${safeStudent}**,\n` +
       `🗓 **Sana:** ${dateStr}\n` +
-      `👥 **Guruh:** ${groupName}\n` +
+      `👥 **Guruh:** ${safeGroup}\n` +
       `📌 **Holat:** ${statusLabel}\n` +
-      (note ? `📝 **Ustoz qaydi:** _${note}_\n` : '') +
+      (note ? `📝 **Ustoz qaydi:** _${safeNote}_\n` : '') +
       `\nShaxsiy kabinetingiz orqali dars materiallari va topshiriqlarni ko'rishingiz mumkin.`;
 
     if (this.bot) {
@@ -917,13 +924,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     gradeType: string,
     comment?: string,
   ) {
+    const safeStudent = escapeTelegramMarkdown(studentName);
+    const safeTitle = escapeTelegramMarkdown(title);
+    const safeGradeType = escapeTelegramMarkdown(gradeType);
+    const safeComment = escapeTelegramMarkdown(comment);
+
     const text =
       `⭐ **Yangi baho qo'yildi!**\n\n` +
-      `Hurmatli **${studentName}**,\n` +
+      `Hurmatli **${safeStudent}**,\n` +
       `Ustozingiz sizga yangi ball qo'ydi:\n\n` +
-      `📝 **Vazifa:** ${title} (${gradeType})\n` +
+      `📝 **Vazifa:** ${safeTitle} (${safeGradeType})\n` +
       `🎯 **Natija:** **${score}** / ${maxScore} ball\n` +
-      (comment ? `💬 **Ustoz fikri:** _${comment}_\n` : '') +
+      (comment ? `💬 **Ustoz fikri:** _${safeComment}_\n` : '') +
       `\nO'qishlaringizda omad va yangi muvaffaqiyatlar tilaymiz!`;
 
     if (this.bot) {
@@ -948,15 +960,20 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     dateStr: string,
     notes?: string,
   ) {
+    const safeStudent = escapeTelegramMarkdown(studentName);
+    const safeReceipt = escapeTelegramMarkdown(receiptNumber);
+    const safeMethod = escapeTelegramMarkdown(method);
+    const safeNotes = escapeTelegramMarkdown(notes);
+
     const text =
       `🧾 **To'lov qabul qilindi (Elektron Kvitansiya)**\n\n` +
-      `Hurmatli **${studentName}**,\n` +
+      `Hurmatli **${safeStudent}**,\n` +
       `To'lovingiz qabul qilindi va tizimga muvaffaqiyatli kiritildi:\n\n` +
-      `🔢 **Kvitansiya №:** \`${receiptNumber}\`\n` +
+      `🔢 **Kvitansiya №:** \`${safeReceipt}\`\n` +
       `💰 **To'lov summasi:** **${amount.toLocaleString()} UZS**\n` +
-      `💳 **To'lov usuli:** ${method}\n` +
+      `💳 **To'lov usuli:** ${safeMethod}\n` +
       `📅 **Sana:** ${dateStr}\n` +
-      (notes ? `📝 **Izoh:** ${notes}\n` : '') +
+      (notes ? `📝 **Izoh:** ${safeNotes}\n` : '') +
       `\nAl-Xorazmiy ta'lim markazini tanlaganingiz uchun tashakkur!`;
 
     if (this.bot) {
@@ -980,10 +997,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     amountDue: number,
     dueDate?: string,
   ) {
+    const safeStudent = escapeTelegramMarkdown(studentName);
+    const safeCourse = escapeTelegramMarkdown(courseName);
+    const safeGroup = escapeTelegramMarkdown(groupName);
+
     const text =
       `⏰ **Oylik to'lov eslatmasi**\n\n` +
-      `Hurmatli **${studentName}**,\n` +
-      `Sizning **${courseName}** (${groupName}) kursi bo'yicha navbatdagi oylik to'lov muddati yaqinlashmoqda:\n\n` +
+      `Hurmatli **${safeStudent}**,\n` +
+      `Sizning **${safeCourse}** (${safeGroup}) kursi bo'yicha navbatdagi oylik to'lov muddati yaqinlashmoqda:\n\n` +
       `💵 **To'lanishi kerak:** **${amountDue.toLocaleString()} UZS**\n` +
       (dueDate ? `📅 **To'lov muddati:** ${dueDate}\n` : '') +
       `\nTo'lovni o'quv markazi ma'muriyati orqali amalga oshirishingiz mumkin. Savollaringiz bo'lsa, administrator bilan bog'laning.`;
@@ -999,6 +1020,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
     return true;
   }
+
 
   // Simulated telegram dispatch for testing or webhook
   async simulateIncomingMessage(telegramId: string, fullName: string, text: string) {
@@ -1189,6 +1211,27 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   async handleTeacherMenu(ctx: any) {
+    const fromId = ctx.from ? String(ctx.from.id) : null;
+    if (!fromId) {
+      await ctx.reply("Foydalanuvchi ma'lumotlari aniqlanmadi.");
+      return;
+    }
+
+    const teacher = await this.prisma.user.findFirst({
+      where: {
+        telegramId: fromId,
+        role: Role.TEACHER,
+        isActive: true,
+      },
+    });
+
+    if (!teacher) {
+      await ctx.reply(
+        "Kechirasiz, siz tizimda faol o'qituvchi sifatida ro'yxatdan o'tmagansiz. Iltimos, ma'muriyatga murojaat qiling.",
+      );
+      return;
+    }
+
     const baseUrl = this.getWebAppBaseUrl();
     const webAppUrl = `${baseUrl}/teacher`;
 

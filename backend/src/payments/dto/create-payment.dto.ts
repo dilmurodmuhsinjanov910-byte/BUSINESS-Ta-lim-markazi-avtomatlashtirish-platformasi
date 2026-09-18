@@ -5,6 +5,8 @@ import {
   IsOptional,
   IsEnum,
   Min,
+  IsPositive,
+  MaxLength,
 } from 'class-validator';
 import { PaymentMethod } from '@prisma/client';
 
@@ -15,7 +17,8 @@ export class CreatePaymentDto {
 
   @IsNotEmpty({ message: "To'lov summasi kiritilishi shart" })
   @IsNumber({}, { message: "To'lov summasi son bo'lishi kerak" })
-  @Min(0, { message: "To'lov summasi manfiy bo'lishi mumkin emas" })
+  @IsPositive({ message: "To'lov summasi musbat son bo'lishi kerak" })
+  @Min(1000, { message: "To'lov summasi kamida 1,000 so'm bo'lishi kerak" })
   amount: number;
 
   @IsOptional()
@@ -28,5 +31,6 @@ export class CreatePaymentDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   notes?: string;
 }

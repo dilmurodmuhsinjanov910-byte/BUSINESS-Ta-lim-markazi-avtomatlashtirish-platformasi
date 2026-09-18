@@ -5,6 +5,8 @@ import {
   Body,
   Param,
   UseGuards,
+  Request,
+  ForbiddenException,
 } from '@nestjs/common';
 import { TeacherMessagesService, ReplyTeacherMessageDto } from './teacher-messages.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -25,7 +27,10 @@ export class TeacherMessagesController {
 
   @Get(':teacherId')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.OWNER, Role.OPERATOR, Role.TEACHER)
-  async getMessages(@Param('teacherId') teacherId: string) {
+  async getMessages(@Param('teacherId') teacherId: string, @Request() req?: any) {
+    if (req?.user?.role === Role.TEACHER && req.user.id !== teacherId) {
+      throw new ForbiddenException("Siz boshqa o'qituvchining xabarlariga kira olmaysiz");
+    }
     return this.teacherMessagesService.getMessages(teacherId);
   }
 
@@ -43,7 +48,11 @@ export class TeacherMessagesController {
   async sendFromTeacher(
     @Param('teacherId') teacherId: string,
     @Body() dto: ReplyTeacherMessageDto,
+    @Request() req?: any,
   ) {
+    if (req?.user?.role === Role.TEACHER && req.user.id !== teacherId) {
+      throw new ForbiddenException("Siz boshqa o'qituvchining xabarlariga kira olmaysiz");
+    }
     return this.teacherMessagesService.sendFromTeacher(teacherId, dto.content);
   }
 }

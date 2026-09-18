@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsNumber, IsOptional, IsEnum, Min, Max } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, IsOptional, IsEnum, Min, Max, MaxLength } from 'class-validator';
 import { GradeType } from '@prisma/client';
 
 export class RecordGradeDto {
@@ -26,10 +26,12 @@ export class RecordGradeDto {
 
   @IsNotEmpty()
   @IsString()
+  @MaxLength(200)
   title: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   comment?: string;
 
   @IsOptional()

@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { RecordAttendanceDto } from './dto/record-attendance.dto';
+import { Role } from '@prisma/client';
 
 @Injectable()
 export class AttendanceService {
@@ -12,12 +13,19 @@ export class AttendanceService {
     private telegramService: TelegramService,
   ) {}
 
-  async recordAttendance(dto: RecordAttendanceDto) {
+  async recordAttendance(dto: RecordAttendanceDto, user?: any) {
     const group = await this.prisma.group.findUnique({
       where: { id: dto.groupId },
     });
     if (!group) {
       throw new NotFoundException(`Guruh topilmadi (ID: ${dto.groupId})`);
+    }
+
+    const effectiveUser = user || (dto.markedById && this.prisma.user?.findUnique ? await this.prisma.user.findUnique({ where: { id: dto.markedById }, select: { id: true, role: true } }) : null);
+    if (effectiveUser?.role === Role.TEACHER) {
+      if (group.teacherId && group.teacherId !== effectiveUser.id) {
+        throw new ForbiddenException("Siz faqat o'zingizga biriktirilgan guruh uchun davomat belgilay olasiz");
+      }
     }
 
     // Normalize date to start of day (midnight UTC)

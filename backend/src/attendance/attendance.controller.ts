@@ -14,7 +14,7 @@ export class AttendanceController {
   @Post()
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   async recordAttendance(@Body() dto: RecordAttendanceDto, @Request() req?: any) {
-    if (!dto.markedById && req?.user?.id) {
+    if (req?.user?.id) {
       dto.markedById = req.user.id;
     }
     return this.attendanceService.recordAttendance(dto);

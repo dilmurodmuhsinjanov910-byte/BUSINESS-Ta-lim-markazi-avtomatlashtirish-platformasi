@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { RecordGradeDto } from './dto/record-grade.dto';
+import { Role } from '@prisma/client';
 
 @Injectable()
 export class GradesService {
@@ -12,7 +13,7 @@ export class GradesService {
     private telegramService: TelegramService,
   ) {}
 
-  async recordGrade(dto: RecordGradeDto) {
+  async recordGrade(dto: RecordGradeDto, user?: any) {
     const enrollment = await this.prisma.enrollment.findUnique({
       where: { id: dto.enrollmentId },
       include: {
@@ -30,6 +31,17 @@ export class GradesService {
       throw new BadRequestException(
         `Biriktirilgan o'quvchi (ID: ${dto.enrollmentId}) ko'rsatilgan guruhga (ID: ${dto.groupId}) tegishli emas`,
       );
+    }
+    if (!dto.groupId && enrollmentGroupId) {
+      dto.groupId = enrollmentGroupId;
+    }
+
+    const effectiveUser = user || (dto.markedById && this.prisma.user?.findUnique ? await this.prisma.user.findUnique({ where: { id: dto.markedById }, select: { id: true, role: true } }) : null);
+    if (effectiveUser?.role === Role.TEACHER) {
+      const teacherId = enrollment.group?.teacherId;
+      if (teacherId && teacherId !== effectiveUser.id) {
+        throw new ForbiddenException("Siz faqat o'zingizga biriktirilgan guruh o'quvchilariga baho qo'ya olasiz");
+      }
     }
 
     const grade = await this.prisma.studentGrade.create({

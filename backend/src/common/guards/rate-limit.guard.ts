@@ -85,12 +85,12 @@ export class RateLimitGuard implements CanActivate {
       ? this.reflector.getAllAndOverride<RateLimitOptions>(RATE_LIMIT_KEY, [handler, targetClass])
       : undefined;
 
-    const path = (request.baseUrl || request.url || request.path || '').toLowerCase();
-    const config = customConfig || this.resolveDefaultConfig(path);
+    const rawPath = (request.originalUrl || request.url || request.path || '').toLowerCase();
+    const normalizedPath = rawPath.split('?')[0] || '/';
+    const config = customConfig || this.resolveDefaultConfig(normalizedPath);
 
     // 4. Resolve client identity (IP and endpoint key)
     const clientIp = this.getClientIp(request);
-    const normalizedPath = path.split('?')[0] || '/';
     const key = `${clientIp}:${normalizedPath}`;
 
     const now = Date.now();
@@ -158,6 +158,10 @@ export class RateLimitGuard implements CanActivate {
     if (path.includes('/ai/')) {
       // AI queries: 20 calls per 60 seconds (DoS defense on LLM API)
       return { limit: 20, ttl: 60 };
+    }
+    if (path.includes('/telegram/simulate')) {
+      // Simulation endpoints: 5 submissions per 60 seconds
+      return { limit: 5, ttl: 60 };
     }
     // Global fallback for standard API routes
     return { limit: 100, ttl: 60 };
