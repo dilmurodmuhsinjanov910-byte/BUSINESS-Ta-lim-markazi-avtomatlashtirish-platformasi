@@ -80,7 +80,10 @@ export class LeadsService {
           preferredLanguage: dto.preferredLanguage || existing.preferredLanguage,
           preferredCourse: dto.preferredCourse || existing.preferredCourse,
           preferredBranchId: dto.preferredBranchId || existing.preferredBranchId,
-          notes: dto.notes ? `${existing.notes ? existing.notes + ' | ' : ''}${dto.notes}` : existing.notes,
+          notes: (() => {
+            const merged = dto.notes ? `${existing.notes ? existing.notes + ' | ' : ''}${dto.notes}` : existing.notes;
+            return merged && merged.length > 2000 ? merged.slice(-2000) : merged;
+          })(),
           score: newScore,
           scoreTier: newTier,
         },

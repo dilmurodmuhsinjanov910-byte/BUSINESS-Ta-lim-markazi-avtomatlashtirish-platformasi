@@ -3,7 +3,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { Role } from '@prisma/client';
 
-export interface ReplyTeacherMessageDto {
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+
+export class ReplyTeacherMessageDto {
+  @IsNotEmpty({ message: "Xabar matni bo'sh bo'lishi mumkin emas" })
+  @IsString({ message: "Xabar matni satr bo'lishi kerak" })
+  @MaxLength(2000)
   content: string;
 }
 

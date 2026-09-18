@@ -2,13 +2,36 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TaskType, TaskPriority, TaskStatus } from '@prisma/client';
 
-export interface CreateTaskDto {
+import { IsNotEmpty, IsString, IsOptional, IsEnum, MaxLength } from 'class-validator';
+
+export class CreateTaskDto {
+  @IsNotEmpty({ message: 'Vazifa sarlavhasi kiritilishi shart' })
+  @IsString({ message: "Vazifa sarlavhasi satr bo'lishi kerak" })
+  @MaxLength(200)
   title: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
   description?: string;
+
+  @IsNotEmpty()
+  @IsEnum(TaskType)
   taskType: TaskType;
+
+  @IsOptional()
+  @IsEnum(TaskPriority)
   priority?: TaskPriority;
+
+  @IsOptional()
+  @IsString()
   assignedToId?: string;
+
+  @IsOptional()
+  @IsString()
   leadId?: string;
+
+  @IsOptional()
   dueDate?: string | Date;
 }
 

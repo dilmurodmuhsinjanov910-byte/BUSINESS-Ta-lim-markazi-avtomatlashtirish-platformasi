@@ -30,44 +30,9 @@ let authRefreshPromise: Promise<string> | null = null;
 export async function ensureAuthenticated(forceRefresh = false): Promise<string> {
   if (forceRefresh) {
     clearAuthToken();
-  } else {
-    const existing = getAuthToken();
-    if (existing) return existing;
-  }
-
-  // Deduplicate concurrent re-authentication calls
-  if (authRefreshPromise) {
-    return authRefreshPromise;
-  }
-
-  authRefreshPromise = (async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: 'admin@education.uz',
-          password: 'AdminPassword123!',
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.accessToken) {
-          setAuthToken(data.accessToken);
-          return data.accessToken;
-        }
-      }
-      clearAuthToken();
-    } catch (e) {
-      console.warn('Auto login failed or backend offline:', e);
-      clearAuthToken();
-    } finally {
-      authRefreshPromise = null;
-    }
     return '';
-  })();
-
-  return authRefreshPromise;
+  }
+  return getAuthToken() || '';
 }
 
 export async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -84,25 +49,6 @@ export async function apiRequest<T>(endpoint: string, options?: RequestInit): Pr
     ...options,
     headers,
   });
-
-  // If 401 Unauthorized, clear stale/invalid token and retry cleanly once
-  const isRetry = Boolean(headers['X-Retry'] || (options?.headers as any)?.['X-Retry']);
-  if (res.status === 401 && !isRetry) {
-    clearAuthToken();
-    const newToken = await ensureAuthenticated(true);
-    if (newToken) {
-      const retryHeaders: Record<string, string> = {
-        ...headers,
-        Authorization: `Bearer ${newToken}`,
-        'X-Retry': 'true',
-      };
-      const retryRes = await fetch(url, { ...options, headers: retryHeaders });
-      if (retryRes.ok) return retryRes.json();
-      if (retryRes.status === 401) {
-        clearAuthToken();
-      }
-    }
-  }
 
   if (!res.ok) {
     if (res.status === 401) {

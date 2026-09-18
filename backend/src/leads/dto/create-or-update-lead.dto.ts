@@ -6,6 +6,7 @@ import {
   IsEnum,
   Min,
   Max,
+  MaxLength,
 } from 'class-validator';
 import { LeadSource } from '@prisma/client';
 
@@ -50,9 +51,12 @@ export class CreateOrUpdateLeadDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   notes?: string;
 
   @IsOptional()
   @IsNumber()
+  @Min(-100)
+  @Max(100)
   initialScoreDelta?: number;
 }

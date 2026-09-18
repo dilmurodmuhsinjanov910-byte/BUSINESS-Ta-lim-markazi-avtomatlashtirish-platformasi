@@ -1,6 +1,7 @@
-import { Controller, Post, Get, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, ForbiddenException } from '@nestjs/common';
 import { AiService, AiProcessInput } from './ai.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RateLimit } from '../common/guards/rate-limit.guard';
 
 @Controller('ai')
 export class AiController {
@@ -18,7 +19,13 @@ export class AiController {
   }
 
   @Post('chat')
+  @RateLimit(20, 60)
   async chat(@Body() body: AiProcessInput) {
+    if (body.toolCall) {
+      throw new ForbiddenException(
+        "To'g'ridan-to'g'ri tool chaqirish uchun autentifikatsiya talab qilinadi. Himoyalangan /api/ai/tool-call endpointidan foydalaning",
+      );
+    }
     return this.aiService.processUserMessage(body);
   }
 

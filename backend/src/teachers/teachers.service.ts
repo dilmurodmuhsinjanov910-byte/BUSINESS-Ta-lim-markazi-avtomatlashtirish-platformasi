@@ -3,27 +3,72 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
-export interface CreateTeacherDto {
+import { IsNotEmpty, IsString, IsEmail, IsOptional, IsBoolean, MinLength } from 'class-validator';
+
+export class CreateTeacherDto {
+  @IsNotEmpty({ message: "O'qituvchi F.I.SH kiritilishi shart" })
+  @IsString({ message: "O'qituvchi F.I.SH satr bo'lishi kerak" })
   fullName: string;
+
+  @IsNotEmpty({ message: 'Email kiritilishi shart' })
+  @IsEmail({}, { message: "Noto'g'ri email formati" })
   email: string;
+
+  @IsNotEmpty({ message: 'Telefon raqami kiritilishi shart' })
+  @IsString({ message: "Telefon raqami satr bo'lishi kerak" })
   phone: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(6, { message: "Parol kamida 6 belgidan iborat bo'lishi kerak" })
   password?: string;
+
+  @IsOptional()
+  @IsString()
   branchId?: string;
 }
 
-export interface UpdateTeacherDto {
+export class UpdateTeacherDto {
+  @IsOptional()
+  @IsString()
   fullName?: string;
+
+  @IsOptional()
+  @IsEmail()
   email?: string;
+
+  @IsOptional()
+  @IsString()
   phone?: string;
+
+  @IsOptional()
+  @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
   branchId?: string;
 }
 
-export interface AssignTeacherGroupDto {
+export class AssignTeacherGroupDto {
+  @IsNotEmpty({ message: 'Guruh ID kiritilishi shart' })
+  @IsString()
   groupId: string;
+
+  @IsOptional()
+  @IsString()
   daysOfWeek?: string;
+
+  @IsOptional()
+  @IsString()
   startTime?: string;
+
+  @IsOptional()
+  @IsString()
   endTime?: string;
+
+  @IsOptional()
+  @IsString()
   roomNumber?: string;
 }
 

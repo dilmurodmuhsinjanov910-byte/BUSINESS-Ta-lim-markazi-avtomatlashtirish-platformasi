@@ -36,9 +36,14 @@ export class EnrollmentsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN, Role.OWNER)
   async getTeacherPortalData(@Query('teacherId') teacherId?: string, @Request() req?: any) {
-    const effectiveTeacherId = (req?.user?.role === Role.TEACHER && !teacherId)
-      ? req.user.id
-      : teacherId;
+    let effectiveTeacherId: string | undefined;
+    if (req?.user?.role === Role.TEACHER) {
+      // Role.TEACHER can strictly only access their own portal data; query parameter is ignored
+      effectiveTeacherId = req.user.id;
+    } else {
+      // Role.ADMIN, SUPER_ADMIN, OWNER may supply custom teacherId or default to caller
+      effectiveTeacherId = teacherId || req?.user?.id;
+    }
     return this.enrollmentsService.getTeacherPortalData(effectiveTeacherId);
   }
 

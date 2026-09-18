@@ -14,18 +14,20 @@ export class GradesController {
   @Post()
   @Roles(Role.TEACHER, Role.ADMIN, Role.SUPER_ADMIN)
   async recordGrade(@Body() dto: RecordGradeDto, @Request() req?: any) {
-    if (!dto.markedById && req?.user?.id) {
+    if (req?.user?.id) {
       dto.markedById = req.user.id;
     }
     return this.gradesService.recordGrade(dto);
   }
 
   @Get('group/:groupId')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.OWNER, Role.OPERATOR, Role.TEACHER)
   async getGroupGrades(@Param('groupId') groupId: string) {
     return this.gradesService.getGroupGrades(groupId);
   }
 
   @Get('enrollment/:enrollmentId')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.OWNER, Role.OPERATOR, Role.TEACHER)
   async getStudentGrades(@Param('enrollmentId') enrollmentId: string) {
     return this.gradesService.getStudentGrades(enrollmentId);
   }

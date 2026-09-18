@@ -23,16 +23,19 @@ export class PaymentsController {
   }
 
   @Get(':id/receipt')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
   async getReceipt(@Param('id') id: string) {
     return this.paymentsService.getReceipt(id);
   }
 
   @Get()
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
   async findAll(@Query('status') status?: PaymentStatus) {
     return this.paymentsService.findAll(status);
   }
 
   @Get(':id')
+  @Roles(Role.SUPER_ADMIN, Role.OWNER, Role.ADMIN, Role.ACCOUNTANT)
   async findOne(@Param('id') id: string) {
     return this.paymentsService.findOne(id);
   }

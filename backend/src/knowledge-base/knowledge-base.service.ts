@@ -2,11 +2,30 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ArticleStatus } from '@prisma/client';
 
-export interface CreateArticleDto {
+import { IsNotEmpty, IsString, IsOptional, IsEnum, MaxLength } from 'class-validator';
+
+export class CreateArticleDto {
+  @IsNotEmpty({ message: 'Maqola sarlavhasi kiritilishi shart' })
+  @IsString({ message: "Maqola sarlavhasi satr bo'lishi kerak" })
+  @MaxLength(200)
   title: string;
+
+  @IsNotEmpty({ message: 'Kategoriya kiritilishi shart' })
+  @IsString({ message: "Kategoriya satr bo'lishi kerak" })
+  @MaxLength(100)
   category: string;
+
+  @IsNotEmpty({ message: 'Maqola mazmuni kiritilishi shart' })
+  @IsString({ message: "Maqola mazmuni satr bo'lishi kerak" })
   content: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
   tags?: string;
+
+  @IsOptional()
+  @IsEnum(ArticleStatus)
   status?: ArticleStatus;
 }
 
