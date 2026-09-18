@@ -39,8 +39,10 @@ import {
   CheckCircle2,
   XCircle,
 } from "lucide-react";
+import { useToast } from "@/components/Toast";
 
 export default function AdminPortal() {
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<
     "dashboard" | "leads" | "trials" | "conversations" | "courses" | "kb" | "tasks" | "teachers" | "attendance" | "audit" | "finance" | "teacherChat"
   >("dashboard");
@@ -651,6 +653,7 @@ export default function AdminPortal() {
         password: newTeacherPassword || undefined,
       });
       setTeacherActionSuccess(t.teacherCreated);
+      toast.success(t.teacherCreated);
       setNewTeacherName("");
       setNewTeacherPhone("+998");
       setNewTeacherEmail("");
@@ -658,7 +661,7 @@ export default function AdminPortal() {
       setShowAddTeacherModal(false);
       await refreshData();
     } catch (err: any) {
-      alert(err.message || "O'qituvchi qo'shishda xatolik yuz berdi");
+      toast.error(err.message || "O'qituvchi qo'shishda xatolik yuz berdi");
     } finally {
       setIsSavingTeacher(false);
     }
@@ -670,9 +673,10 @@ export default function AdminPortal() {
       setIsDeletingTeacherId(teacherId);
       await crmApi.deleteTeacher(teacherId);
       setTeacherActionSuccess(t.teacherRemoved);
+      toast.success(t.teacherRemoved);
       await refreshData();
     } catch (err: any) {
-      alert(err.message || "O'qituvchini olib tashlashda xatolik yuz berdi");
+      toast.error(err.message || "O'qituvchini olib tashlashda xatolik yuz berdi");
     } finally {
       setIsDeletingTeacherId(null);
     }
@@ -710,10 +714,11 @@ export default function AdminPortal() {
         roomNumber: assignRoomNumber,
       });
       setTeacherActionSuccess(t.groupAssigned);
+      toast.success(t.groupAssigned);
       setShowAssignGroupModal(false);
       await refreshData();
     } catch (err: any) {
-      alert("Guruh biriktirishda xatolik: " + (err.message || "Noma'lum"));
+      toast.error("Guruh biriktirishda xatolik: " + (err.message || "Noma'lum"));
     } finally {
       setIsAssigningGroup(false);
     }
@@ -740,10 +745,11 @@ export default function AdminPortal() {
       setTeacherMessages((prev) => [...prev, newMsg]);
       setAdminReplyText("");
       setTeacherActionSuccess(t.replySent);
+      toast.success(t.replySent);
       const updatedConvs = await crmApi.getTeacherConversations();
       setTeacherConversations(updatedConvs);
     } catch (e: any) {
-      alert("Javob yuborishda xatolik: " + (e.message || "Noma'lum"));
+      toast.error("Javob yuborishda xatolik: " + (e.message || "Noma'lum"));
     } finally {
       setIsSendingReply(false);
     }
@@ -798,18 +804,18 @@ export default function AdminPortal() {
       });
 
       if (res?.isDuplicate) {
-        alert(
+        toast.info(
           `[DE-DUPLICATION]: ${newLeadPhone} raqamli o'quvchi allaqachon mavjud! Dublikat yaratilmadi, uning bali oshirildi: ${res.lead?.score} (${res.lead?.scoreTier}).`
         );
       } else {
-        alert(`[YANGI LEAD]: ${newLeadName} muvaffaqiyatli saqlandi!`);
+        toast.success(`[YANGI LEAD]: ${newLeadName} muvaffaqiyatli saqlandi!`);
       }
       await refreshData();
     } catch (err: any) {
       console.warn("API createLead failed, local fallback:", err.message);
       const existingIndex = leads.findIndex((l) => l.phone.includes(newLeadPhone.trim()));
       if (existingIndex !== -1) {
-        alert(`[DE-DUPLICATION]: ${newLeadPhone} raqamli o'quvchi allaqachon mavjud! Dublikat yaratilmadi, uning bali oshirildi.`);
+        toast.info(`[DE-DUPLICATION]: ${newLeadPhone} raqamli o'quvchi allaqachon mavjud! Dublikat yaratilmadi, uning bali oshirildi.`);
         const updated = [...leads];
         updated[existingIndex].score = Math.min(100, updated[existingIndex].score + 10);
         setLeads(updated);
@@ -828,6 +834,7 @@ export default function AdminPortal() {
           createdAt: "Hozirgina",
         };
         setLeads([newEntry, ...leads]);
+        toast.success(`[YANGI LEAD]: ${newLeadName} muvaffaqiyatli saqlandi!`);
       }
     }
 
@@ -853,7 +860,7 @@ export default function AdminPortal() {
       setNewKbContent("");
       setNewKbTags("");
       await refreshData(true);
-      alert("✅ Yangi savol-javob muvaffaqiyatli saqlandi va Telegram bot bilimlar bazasiga qo'shildi!");
+      toast.success("✅ Yangi savol-javob muvaffaqiyatli saqlandi va Telegram bot bilimlar bazasiga qo'shildi!");
     } catch (err: any) {
       console.warn("createArticle API failed, fallback:", err.message);
       const newArt = {
@@ -869,7 +876,7 @@ export default function AdminPortal() {
       setNewKbTitle("");
       setNewKbContent("");
       setNewKbTags("");
-      alert("✅ Yangi savol-javob qo'shildi!");
+      toast.success("✅ Yangi savol-javob qo'shildi!");
     }
   };
 
@@ -944,9 +951,9 @@ export default function AdminPortal() {
       setShowEnrollModal(false);
       setEnrollingLead(null);
       await refreshData(true);
-      alert("🎉 O'quvchi kursga muvaffaqiyatli qabul qilindi!\nTelegram bot orqali o'quvchiga Mini App havolasi yuborildi.");
+      toast.success("🎉 O'quvchi kursga muvaffaqiyatli qabul qilindi!\nTelegram bot orqali o'quvchiga Mini App havolasi yuborildi.");
     } catch (err: any) {
-      alert(err.message || "Qabul qilishda xatolik yuz berdi");
+      toast.error(err.message || "Qabul qilishda xatolik yuz berdi");
     } finally {
       setIsEnrolling(false);
     }
@@ -958,7 +965,7 @@ export default function AdminPortal() {
       setSelectedReceipt(receipt);
       setShowReceiptModal(true);
     } catch (err: any) {
-      alert("Kvitansiyani yuklashda xatolik: " + (err.message || err));
+      toast.error("Kvitansiyani yuklashda xatolik: " + (err.message || err));
     }
   };
 
@@ -978,12 +985,13 @@ export default function AdminPortal() {
       setDirectPayNotes("");
       await refreshData(true);
       if (res?.id) {
+        toast.success("✅ To'lov muvaffaqiyatli qabul qilindi va kvitansiya Telegramga yuborildi!");
         handleOpenReceipt(res.id);
       } else {
-        alert("✅ To'lov muvaffaqiyatli qabul qilindi va kvitansiya Telegramga yuborildi!");
+        toast.success("✅ To'lov muvaffaqiyatli qabul qilindi va kvitansiya Telegramga yuborildi!");
       }
     } catch (err: any) {
-      alert("To'lovni saqlashda xato: " + (err.message || err));
+      toast.error("To'lovni saqlashda xato: " + (err.message || err));
     } finally {
       setIsProcessingPayment(false);
     }
@@ -993,10 +1001,10 @@ export default function AdminPortal() {
     setNotifyingDebtorId(leadId);
     try {
       await crmApi.notifyDebtor(leadId);
-      alert("✅ Telegram orqali qarzdorlik eslatmasi muvaffaqiyatli yuborildi!");
+      toast.success("✅ Telegram orqali qarzdorlik eslatmasi muvaffaqiyatli yuborildi!");
       await refreshData();
     } catch (err: any) {
-      alert("Eslatmani yuborishda xato: " + (err.message || err));
+      toast.error("Eslatmani yuborishda xato: " + (err.message || err));
     } finally {
       setNotifyingDebtorId(null);
     }
@@ -1665,9 +1673,10 @@ export default function AdminPortal() {
                               onClick={async () => {
                                 try {
                                   await crmApi.updateBookingStatus(tb.id, "ATTENDED");
+                                  toast.success("O'quvchi sinov darsiga kelgan deb belgilandi!");
                                   await refreshData();
                                 } catch (e: any) {
-                                  alert(`Xatolik: ${e.message}`);
+                                  toast.error(`Xatolik: ${e.message}`);
                                 }
                               }}
                               className="flex-1 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
@@ -1679,9 +1688,10 @@ export default function AdminPortal() {
                                 const reason = prompt("Dars qoldirish sababini kiriting:") || "Sababsiz kelmadi";
                                 try {
                                   await crmApi.updateBookingStatus(tb.id, "MISSED", reason);
+                                  toast.info("O'quvchi kelmadi deb belgilandi.");
                                   await refreshData();
                                 } catch (e: any) {
-                                  alert(`Xatolik: ${e.message}`);
+                                  toast.error(`Xatolik: ${e.message}`);
                                 }
                               }}
                               className="flex-1 py-1.5 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
@@ -1933,9 +1943,10 @@ export default function AdminPortal() {
                             onClick={async () => {
                               try {
                                 await crmApi.publishArticle(article.id);
+                                toast.success("Maqola nashr etildi!");
                                 await refreshData();
                               } catch (e: any) {
-                                alert(`Xatolik: ${e.message}`);
+                                toast.error(`Xatolik: ${e.message}`);
                               }
                             }}
                             className="text-indigo-600 hover:text-indigo-800 font-semibold"
@@ -1993,9 +2004,10 @@ export default function AdminPortal() {
                             onClick={async () => {
                               try {
                                 await crmApi.updateTask(task.id, { status: "DONE" });
+                                toast.success("Vazifa bajarildi!");
                                 await refreshData();
                               } catch (e: any) {
-                                alert(`Xatolik: ${e.message}`);
+                                toast.error(`Xatolik: ${e.message}`);
                               }
                             }}
                             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs"
@@ -2493,24 +2505,31 @@ export default function AdminPortal() {
                       <span className="text-xs text-indigo-200">Real vaqtda sinxronizatsiya</span>
                     </div>
                     <h2 className="text-xl font-black mt-2 tracking-tight text-white">
-                      Davomat & Baholar Nazorat Jurnali
+                      {t.attendanceJournalTitle || "Davomat & Baholar Nazorat Jurnali"}
                     </h2>
                     <p className="text-xs text-indigo-100/80 mt-1 max-w-xl leading-relaxed">
-                      O'qituvchilar Telegram orqali qo'ygan davomat va baholar avtomatik tarzda ushbu markaziy boshqaruv paneliga tushadi hamda o'quvchining shaxsiy Telegram Mini App kabinetida aks etadi.
+                      {t.attendanceJournalSubtitle || "O'qituvchilar Telegram orqali qo'ygan davomat va baholar avtomatik tarzda ushbu markaziy boshqaruv paneliga tushadi hamda o'quvchining shaxsiy Telegram Mini App kabinetida aks etadi."}
                     </p>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-
                     <a
                       href="/student"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition flex items-center space-x-2"
+                      className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition flex items-center space-x-1.5 shadow-xs"
                     >
-                      <span>📱</span>
-                      <span>Talaba Kabineti (Mini App)</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>🎓</span>
+                      <span>{t.openStudentMiniApp || "Talaba Portali ↗"}</span>
+                    </a>
+                    <a
+                      href="/teacher"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3.5 py-2 rounded-xl bg-purple-500/30 hover:bg-purple-500/40 text-purple-100 text-xs font-bold border border-purple-400/40 transition flex items-center space-x-1.5 shadow-xs"
+                    >
+                      <span>👨‍🏫</span>
+                      <span>{t.openTeacherMiniApp || "O'qituvchi Portali ↗"}</span>
                     </a>
                   </div>
                 </div>

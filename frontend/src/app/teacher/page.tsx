@@ -3,6 +3,7 @@
 import React, { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { crmApi } from '@/lib/api';
+import { useToast } from '@/components/Toast';
 
 interface TeacherGroup {
   id: string;
@@ -28,6 +29,7 @@ interface TeacherGroup {
 }
 
 function TeacherPortalContent() {
+  const toast = useToast();
   const searchParams = useSearchParams();
   const teacherIdParam = searchParams.get('teacherId');
 
@@ -161,9 +163,10 @@ function TeacherPortalContent() {
       });
 
       setAttendanceSuccess("✅ Davomat muvaffaqiyatli saqlandi va Admin Panelga sinxronlashtirildi!");
+      toast.success("Davomat muvaffaqiyatli saqlandi va Admin Panelga sinxronlashtirildi!");
       setTimeout(() => setAttendanceSuccess(null), 5000);
     } catch (err: any) {
-      alert(err.message || 'Davomatni saqlashda xato yuz berdi');
+      toast.error(err.message || 'Davomatni saqlashda xato yuz berdi');
     } finally {
       setIsSavingAttendance(false);
     }
@@ -172,7 +175,7 @@ function TeacherPortalContent() {
   const handleSaveGrade = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedStudentForGrade || !gradeTitle) {
-      alert("Iltimos, o'quvchi va topshiriq mavzusini tanlang");
+      toast.warning("Iltimos, o'quvchi va topshiriq mavzusini tanlang");
       return;
     }
 
@@ -190,6 +193,7 @@ function TeacherPortalContent() {
       });
 
       setGradeSuccess("✅ Baho muvaffaqiyatli saqlandi va talaba kabinetiga yuborildi!");
+      toast.success("Baho muvaffaqiyatli saqlandi va talaba kabinetiga yuborildi!");
       setGradeTitle('');
       setGradeComment('');
       setTimeout(() => setGradeSuccess(null), 5000);
@@ -197,7 +201,7 @@ function TeacherPortalContent() {
       // Refresh teacher data to show latest average grade
       loadTeacherData();
     } catch (err: any) {
-      alert(err.message || 'Bahoni saqlashda xato yuz berdi');
+      toast.error(err.message || 'Bahoni saqlashda xato yuz berdi');
     } finally {
       setIsSavingGrade(false);
     }
@@ -330,10 +334,11 @@ function TeacherPortalContent() {
             {/* Date Picker & Quick Actions */}
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-800 space-y-3">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                <label htmlFor="teacher-attendance-date" className="text-xs font-bold text-slate-700 dark:text-slate-300">
                   Dars sanasi:
                 </label>
                 <input
+                  id="teacher-attendance-date"
                   type="date"
                   value={attendanceDate}
                   onChange={(e) => setAttendanceDate(e.target.value)}
@@ -388,15 +393,15 @@ function TeacherPortalContent() {
                           </div>
                         </div>
 
-                        {/* 4 Attendance Status Buttons */}
+                        {/* 4 Attendance Status Buttons (44px touch ergonomics) */}
                         <div className="grid grid-cols-4 gap-1.5">
                           <button
                             type="button"
                             onClick={() => setStudentStatus(st.enrollmentId, 'PRESENT')}
-                            className={`py-1.5 text-xs font-bold rounded-lg border transition ${
+                            className={`min-h-[44px] py-2 text-xs font-bold rounded-xl border flex items-center justify-center transition ${
                               currentStatus === 'PRESENT'
                                 ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-slate-300'
                             }`}
                           >
                             Bor
@@ -404,10 +409,10 @@ function TeacherPortalContent() {
                           <button
                             type="button"
                             onClick={() => setStudentStatus(st.enrollmentId, 'LATE')}
-                            className={`py-1.5 text-xs font-bold rounded-lg border transition ${
+                            className={`min-h-[44px] py-2 text-xs font-bold rounded-xl border flex items-center justify-center transition ${
                               currentStatus === 'LATE'
                                 ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
-                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-slate-300'
                             }`}
                           >
                             Kech
@@ -415,10 +420,10 @@ function TeacherPortalContent() {
                           <button
                             type="button"
                             onClick={() => setStudentStatus(st.enrollmentId, 'EXCUSED')}
-                            className={`py-1.5 text-xs font-bold rounded-lg border transition ${
+                            className={`min-h-[44px] py-2 text-xs font-bold rounded-xl border flex items-center justify-center transition ${
                               currentStatus === 'EXCUSED'
                                 ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-slate-300'
                             }`}
                           >
                             Sababli
@@ -426,10 +431,10 @@ function TeacherPortalContent() {
                           <button
                             type="button"
                             onClick={() => setStudentStatus(st.enrollmentId, 'ABSENT')}
-                            className={`py-1.5 text-xs font-bold rounded-lg border transition ${
+                            className={`min-h-[44px] py-2 text-xs font-bold rounded-xl border flex items-center justify-center transition ${
                               currentStatus === 'ABSENT'
                                 ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
-                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-slate-300'
                             }`}
                           >
                             Yo'q
@@ -440,10 +445,11 @@ function TeacherPortalContent() {
                         {(currentStatus === 'LATE' || currentStatus === 'EXCUSED') && (
                           <input
                             type="text"
+                            aria-label={`${st.fullName} uchun kechikish yoki sabab izohi`}
                             placeholder="Sabab yoki kechikish daqiqasi..."
                             value={attendanceMap[st.enrollmentId]?.notes || ''}
                             onChange={(e) => setStudentNotes(st.enrollmentId, e.target.value)}
-                            className="mt-2 w-full px-2.5 py-1 text-xs border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800"
+                            className="mt-2 w-full px-2.5 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800"
                           />
                         )}
                       </div>
@@ -489,10 +495,11 @@ function TeacherPortalContent() {
               </h4>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                <label htmlFor="grade-student-select" className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
                   Talaba:
                 </label>
                 <select
+                  id="grade-student-select"
                   value={selectedStudentForGrade}
                   onChange={(e) => setSelectedStudentForGrade(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 font-medium"
@@ -509,10 +516,11 @@ function TeacherPortalContent() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                  <label htmlFor="grade-type-select" className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
                     Baho turi:
                   </label>
                   <select
+                    id="grade-type-select"
                     value={gradeType}
                     onChange={(e) => setGradeType(e.target.value)}
                     className="w-full px-2.5 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800"
@@ -525,11 +533,12 @@ function TeacherPortalContent() {
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                  <label htmlFor="grade-score-input" className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
                     To'plangan Ball:
                   </label>
                   <div className="flex items-center space-x-1">
                     <input
+                      id="grade-score-input"
                       type="number"
                       min={0}
                       max={100}
@@ -544,10 +553,11 @@ function TeacherPortalContent() {
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                <label htmlFor="grade-title-input" className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
                   Mavzu / Vazifa nomi:
                 </label>
                 <input
+                  id="grade-title-input"
                   type="text"
                   placeholder="Masalan: Unit 4 Present Perfect Test"
                   value={gradeTitle}
@@ -558,10 +568,11 @@ function TeacherPortalContent() {
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                <label htmlFor="grade-comment-textarea" className="text-xs font-semibold text-slate-700 dark:text-slate-300 block mb-1">
                   Ustoz izohi (ixtiyoriy):
                 </label>
                 <textarea
+                  id="grade-comment-textarea"
                   placeholder="Talabaga tavsiya yoki xatolari haqida izoh..."
                   value={gradeComment}
                   onChange={(e) => setGradeComment(e.target.value)}
