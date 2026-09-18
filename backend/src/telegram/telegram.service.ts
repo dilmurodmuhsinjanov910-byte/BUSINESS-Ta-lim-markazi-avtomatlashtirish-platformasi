@@ -85,6 +85,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  getWebAppBaseUrl(): string {
+    const configured = this.configService.get<string>('WEBAPP_BASE_URL');
+    if (configured && configured.startsWith('https://')) {
+      return configured.replace(/\/+$/, '');
+    }
+    return 'https://bd904c086ab09708-194-93-24-12.serveousercontent.com';
+  }
+
   private setupHandlers() {
     if (!this.bot) return;
 
@@ -108,21 +116,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       });
 
       if (activeEnrollment) {
-        const baseUrl = this.configService.get<string>('WEBAPP_BASE_URL') || 'http://localhost:3000';
+        const baseUrl = this.getWebAppBaseUrl();
         const webAppUrl = `${baseUrl}/student?telegramId=${telegramId}&enrollmentId=${activeEnrollment.id}`;
-        const isHttps = webAppUrl.startsWith('https://');
 
-        const studentReplyKeyboard = isHttps
-          ? Markup.keyboard([
-              [Markup.button.webApp('📱 Talaba Kabineti (Mini App)', webAppUrl)],
-              ['📅 Dars jadvalim', '📊 Baholarim va Davomat'],
-              ['💳 To\'lov holati', '📞 Ma\'muriyat bilan bog\'lanish'],
-            ]).resize()
-          : Markup.keyboard([
-              ['📱 Talaba Kabineti (Mini App)', '📅 Dars jadvalim'],
-              ['📊 Baholarim va Davomat', '💳 To\'lov holati'],
-              ['📞 Ma\'muriyat bilan bog\'lanish'],
-            ]).resize();
+        const studentReplyKeyboard = Markup.keyboard([
+          [Markup.button.webApp('📱 Talaba Kabineti (Mini App)', webAppUrl)],
+          ['📅 Dars jadvalim', '📊 Baholarim va Davomat'],
+          ['💳 To\'lov holati', '📞 Ma\'muriyat bilan bog\'lanish'],
+        ]).resize();
+
+        const inlineKeyboard = Markup.inlineKeyboard([
+          [Markup.button.webApp("🚀 Mini Appga o'tish", webAppUrl)],
+        ]);
 
         const studentWelcome =
           `Assalomu alaykum, hurmatli **${activeEnrollment.lead.fullName}**!\n\n` +
@@ -132,6 +137,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         await ctx.reply(studentWelcome, { parse_mode: 'Markdown', ...studentReplyKeyboard }).catch(async () => {
           await ctx.reply(studentWelcome, studentReplyKeyboard);
         });
+
+        await ctx.reply("👇 Talaba shaxsiy kabinetiga tezkor kirish:", inlineKeyboard).catch(() => {});
         return;
       }
 
@@ -237,15 +244,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     // Handle student mini app commands and button
     const replyStudentCabinet = async (ctx: any) => {
       const telegramId = String(ctx.from.id);
-      const baseUrl = this.configService.get<string>('WEBAPP_BASE_URL') || 'http://localhost:3000';
+      const baseUrl = this.getWebAppBaseUrl();
       const webAppUrl = `${baseUrl}/student?telegramId=${telegramId}`;
-      const isHttps = webAppUrl.startsWith('https://');
 
       const keyboard = Markup.inlineKeyboard([
         [
-          isHttps
-            ? Markup.button.webApp('📱 Mening kabinetim (Mini App)', webAppUrl)
-            : Markup.button.url('📱 Mening kabinetim (Brauzerda)', webAppUrl),
+          Markup.button.webApp("🚀 Mini Appga o'tish", webAppUrl),
         ],
       ]);
 
@@ -253,8 +257,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         `🎓 **O'quvchi Kabineti (Telegram Mini App)**\n\n` +
         `Kurslaringiz, dars jadvali, davomat ko'rsatkichlari va o'qituvchingiz qo'ygan baholarni ko'rish uchun quyidagi tugmani bosing:`;
 
-      await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard }).catch(async () => {
-        await ctx.reply(`${text}\n\nKabinet ssilkasi: ${webAppUrl}`);
+      await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard }).catch(async (err: any) => {
+        this.logger.error(`replyStudentCabinet error: ${err.message}`);
+        await ctx.reply(text, keyboard).catch(async () => {
+          await ctx.reply(text);
+        });
       });
     };
 
@@ -816,43 +823,33 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     if (this.bot) {
       try {
-        const isHttps = webAppUrl.startsWith('https://');
+        const effectiveUrl = webAppUrl && webAppUrl.startsWith('https://')
+          ? webAppUrl
+          : `${this.getWebAppBaseUrl()}/student?telegramId=${telegramId}`;
 
-        // Set Telegram native Mini App menu button next to text input if HTTPS
-        if (isHttps) {
-          try {
-            await (this.bot.telegram as any).setChatMenuButton({
-              chatId: Number(telegramId),
-              menuButton: {
-                type: 'web_app',
-                text: 'Talaba Kabineti',
-                web_app: { url: webAppUrl },
-              },
-            });
-          } catch (e: any) {
-            this.logger.warn(`setChatMenuButton warning: ${e.message}`);
-          }
+        // Set Telegram native Mini App menu button next to text input
+        try {
+          await (this.bot.telegram as any).setChatMenuButton({
+            chatId: Number(telegramId),
+            menuButton: {
+              type: 'web_app',
+              text: 'Talaba Kabineti',
+              web_app: { url: effectiveUrl },
+            },
+          });
+        } catch (e: any) {
+          this.logger.warn(`setChatMenuButton warning: ${e.message}`);
         }
 
         // Student reply keyboard completely replaces and removes the old lead qualification keyboard!
-        const studentReplyKeyboard = isHttps
-          ? Markup.keyboard([
-              [Markup.button.webApp('📱 Talaba Kabineti (Mini App)', webAppUrl)],
-              ['📅 Dars jadvalim', '📊 Baholarim va Davomat'],
-              ['💳 To\'lov holati', '📞 Ma\'muriyat bilan bog\'lanish'],
-            ]).resize()
-          : Markup.keyboard([
-              ['📱 Talaba Kabineti (Mini App)', '📅 Dars jadvalim'],
-              ['📊 Baholarim va Davomat', '💳 To\'lov holati'],
-              ['📞 Ma\'muriyat bilan bog\'lanish'],
-            ]).resize();
+        const studentReplyKeyboard = Markup.keyboard([
+          [Markup.button.webApp('📱 Talaba Kabineti (Mini App)', effectiveUrl)],
+          ['📅 Dars jadvalim', '📊 Baholarim va Davomat'],
+          ['💳 To\'lov holati', '📞 Ma\'muriyat bilan bog\'lanish'],
+        ]).resize();
 
         const inlineKeyboard = Markup.inlineKeyboard([
-          [
-            isHttps
-              ? Markup.button.webApp('📱 Talaba Kabinetini ochish (Mini App)', webAppUrl)
-              : Markup.button.url('📱 Talaba Kabinetini ochish (Brauzerda)', webAppUrl),
-          ],
+          [Markup.button.webApp("🚀 Mini Appga o'tish", effectiveUrl)],
         ]);
 
         await this.bot.telegram.sendMessage(telegramId, text, {
@@ -1192,9 +1189,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   async handleTeacherMenu(ctx: any) {
-    const baseUrl = this.configService.get<string>('WEBAPP_BASE_URL') || 'http://localhost:3000';
+    const baseUrl = this.getWebAppBaseUrl();
     const webAppUrl = `${baseUrl}/teacher`;
-    const isHttps = webAppUrl.startsWith('https://');
 
     const teacherKeyboard = Markup.keyboard([
       ['📋 Mening guruhlarim', '📝 Davomat olish'],
@@ -1204,9 +1200,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     const inlineKeyboard = Markup.inlineKeyboard([
       [
-        isHttps
-          ? Markup.button.webApp("👨‍🏫 O'qituvchi jurnali (Mini App)", webAppUrl)
-          : Markup.button.url("👨‍🏫 O'qituvchi jurnali (Brauzerda)", webAppUrl),
+        Markup.button.webApp("👨‍🏫 O'qituvchi jurnali (Mini App)", webAppUrl),
       ],
     ]);
 

@@ -247,4 +247,22 @@ describe('TelegramService', () => {
       );
     });
   });
+
+  describe('Mini App URL & Notification', () => {
+    it('should return a valid HTTPS base URL for Telegram Mini App', () => {
+      const url = service.getWebAppBaseUrl();
+      expect(url).toMatch(/^https:\/\//);
+    });
+
+    it('should safely execute sendEnrollmentNotification with webApp button', async () => {
+      const sent = await service.sendEnrollmentNotification(
+        '123456789',
+        'General English',
+        'ENG-101',
+        'Du-Chor-Jum (10:00 - 11:20)',
+        'https://my-domain.uz/student?telegramId=123456789',
+      );
+      expect(sent).toBe(true);
+    });
+  });
 });
