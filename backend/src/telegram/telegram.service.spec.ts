@@ -6,6 +6,7 @@ import { AiService } from '../ai/ai.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { GroupsService } from '../groups/groups.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { LeadStatus } from '@prisma/client';
 
 describe('TelegramService', () => {
@@ -91,6 +92,27 @@ describe('TelegramService', () => {
     ]),
   };
 
+  const mockPrisma = {
+    enrollment: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      count: jest.fn().mockResolvedValue(0),
+    },
+    attendance: {
+      count: jest.fn().mockResolvedValue(0),
+    },
+    payment: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    user: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findUnique: jest.fn().mockResolvedValue(null),
+      update: jest.fn().mockResolvedValue({}),
+    },
+    teacherMessage: {
+      create: jest.fn().mockResolvedValue({}),
+    },
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -104,6 +126,7 @@ describe('TelegramService', () => {
         { provide: ConversationsService, useValue: mockConversationsService },
         { provide: BookingsService, useValue: mockBookingsService },
         { provide: GroupsService, useValue: mockGroupsService },
+        { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
 

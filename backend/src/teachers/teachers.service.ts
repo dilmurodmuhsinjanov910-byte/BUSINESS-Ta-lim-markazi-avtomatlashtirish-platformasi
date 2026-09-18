@@ -19,6 +19,14 @@ export interface UpdateTeacherDto {
   branchId?: string;
 }
 
+export interface AssignTeacherGroupDto {
+  groupId: string;
+  daysOfWeek?: string;
+  startTime?: string;
+  endTime?: string;
+  roomNumber?: string;
+}
+
 @Injectable()
 export class TeachersService {
   constructor(private prisma: PrismaService) {}
@@ -45,6 +53,10 @@ export class TeachersService {
         id: true,
         name: true,
         teacherId: true,
+        daysOfWeek: true,
+        startTime: true,
+        endTime: true,
+        roomNumber: true,
       },
     });
 
@@ -55,11 +67,20 @@ export class TeachersService {
         fullName: t.fullName,
         email: t.email,
         phone: t.phone || '',
+        telegramId: t.telegramId || '',
         isActive: t.isActive,
         branchId: t.branchId,
         branchName: t.branch?.name || 'Asosiy filial',
         assignedGroupsCount: assigned.length,
         assignedGroups: assigned.map((g) => g.name),
+        assignedGroupDetails: assigned.map((g) => ({
+          id: g.id,
+          name: g.name,
+          daysOfWeek: g.daysOfWeek,
+          startTime: g.startTime,
+          endTime: g.endTime,
+          roomNumber: g.roomNumber || '',
+        })),
         createdAt: t.createdAt,
       };
     });
@@ -180,6 +201,38 @@ export class TeachersService {
       isActive: updated.isActive,
       branchName: updated.branch?.name || 'Asosiy filial',
     };
+  }
+
+  async assignGroup(id: string, dto: AssignTeacherGroupDto) {
+    const teacher = await this.prisma.user.findFirst({
+      where: { id, role: Role.TEACHER },
+    });
+    if (!teacher) {
+      throw new NotFoundException("O'qituvchi topilmadi");
+    }
+
+    const group = await this.prisma.group.findUnique({
+      where: { id: dto.groupId },
+    });
+    if (!group) {
+      throw new NotFoundException("Guruh topilmadi");
+    }
+
+    const updated = await this.prisma.group.update({
+      where: { id: dto.groupId },
+      data: {
+        teacherId: id,
+        ...(dto.daysOfWeek ? { daysOfWeek: dto.daysOfWeek } : {}),
+        ...(dto.startTime ? { startTime: dto.startTime } : {}),
+        ...(dto.endTime ? { endTime: dto.endTime } : {}),
+        ...(dto.roomNumber !== undefined ? { roomNumber: dto.roomNumber } : {}),
+      },
+      include: {
+        course: true,
+      },
+    });
+
+    return updated;
   }
 
   async remove(id: string) {

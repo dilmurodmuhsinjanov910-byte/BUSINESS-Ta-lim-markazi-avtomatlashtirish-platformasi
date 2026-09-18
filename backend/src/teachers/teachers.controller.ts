@@ -43,6 +43,12 @@ export class TeachersController {
     return this.teachersService.update(id, dto);
   }
 
+  @Put(':id/assign-group')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.OWNER)
+  async assignGroup(@Param('id') id: string, @Body() dto: any) {
+    return this.teachersService.assignGroup(id, dto);
+  }
+
   @Delete(':id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.OWNER)
   async remove(@Param('id') id: string) {
