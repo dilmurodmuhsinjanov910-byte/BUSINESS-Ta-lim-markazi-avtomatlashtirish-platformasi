@@ -166,7 +166,10 @@ export class EnrollmentsService {
 
     // Notify student on Telegram with Mini App WebApp button
     if (lead.telegramId) {
-      const baseUrl = this.configService.get<string>('WEBAPP_BASE_URL') || 'http://localhost:3000';
+      const configuredBase = this.configService.get<string>('WEBAPP_BASE_URL');
+      const baseUrl = (configuredBase && configuredBase.startsWith('https://'))
+        ? configuredBase.replace(/\/+$/, '')
+        : 'https://bd904c086ab09708-194-93-24-12.serveousercontent.com';
       const webAppUrl = `${baseUrl}/student?telegramId=${lead.telegramId}&enrollmentId=${enrollment.id}`;
       const schedule = `${group.daysOfWeek} (${group.startTime} - ${group.endTime}), Xona: ${group.roomNumber || 'Asosiy'}`;
 
