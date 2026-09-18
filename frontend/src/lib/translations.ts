@@ -152,6 +152,21 @@ export const translations = {
     paidThisMonth: "To'langan",
     remainingDebt: "Qoldiq Qarz",
     dueDate: "To'lov Muddati",
+
+    // Section Titles & Subtitles
+    attendanceJournalTitle: "Davomat & Baholar Nazorat Jurnali",
+    attendanceJournalSubtitle: "O'qituvchilar qo'ygan davomat va baholarni real vaqtda kuzatish va nazorat qilish",
+    openTeacherMiniApp: "O'qituvchi Portali (Mini App) ↗",
+    openStudentMiniApp: "Talaba Portali (Mini App) ↗",
+    allGroups: "Barcha guruhlar",
+    filterGroup: "Guruh bo'yicha filter",
+    searchStudent: "O'quvchini qidirish...",
+    kassaTitle: "Moliya & Kassa Markazi",
+    kassaSubtitle: "O'quvchilar to'lovlari, kvitansiyalar, qarzdorlik nazorati va avtomatlashtirilgan eslatmalar",
+    auditTitle: "Tizim Harakatlari Auditi (Audit Trail)",
+    auditSubtitle: "Foydalanuvchilar va tizim harakatlarining xavfsiz va to'liq jurnali",
+    groupsTitle: "Guruhlar va Dars Jadvallari",
+    groupsSubtitle: "Barcha faol va to'plam jarayonidagi guruhlar",
   },
   ru: {
     // Brand
@@ -304,5 +319,20 @@ export const translations = {
     paidThisMonth: "Оплачено",
     remainingDebt: "Остаток Долга",
     dueDate: "Срок Оплаты",
+
+    // Section Titles & Subtitles
+    attendanceJournalTitle: "Журнал Контроля Посещаемости и Оценок",
+    attendanceJournalSubtitle: "Мониторинг и контроль посещаемости и оценок преподавателей в реальном времени",
+    openTeacherMiniApp: "Портал Преподавателя (Mini App) ↗",
+    openStudentMiniApp: "Портал Студента (Mini App) ↗",
+    allGroups: "Все группы",
+    filterGroup: "Фильтр по группе",
+    searchStudent: "Поиск студента...",
+    kassaTitle: "Финансово-Кассовый Центр",
+    kassaSubtitle: "Платежи студентов, квитанции, контроль долгов и автоматические напоминания",
+    auditTitle: "Аудит Действий Системы (Audit Trail)",
+    auditSubtitle: "Безопасный и полный журнал действий пользователей и системы",
+    groupsTitle: "Группы и Расписание Занятий",
+    groupsSubtitle: "Все активные и формирующиеся группы",
   }
 };

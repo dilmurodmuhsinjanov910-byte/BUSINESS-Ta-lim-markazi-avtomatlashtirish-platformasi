@@ -84,6 +84,7 @@ function StudentPortalContent() {
   const [error, setError] = useState<string | null>(null);
   const [selectedEnrollmentIdx, setSelectedEnrollmentIdx] = useState(0);
   const [activeTab, setActiveTab] = useState<'info' | 'attendance' | 'grades'>('info');
+  const [manualId, setManualId] = useState('');
 
   const identifier = telegramIdParam || leadIdParam;
 
@@ -96,56 +97,65 @@ function StudentPortalContent() {
     }
 
     if (!identifier) {
-      // If no param, try fetching first available enrollment or show helpful search
-      setError("Talaba identifikatori ko'rsatilmadi. Telegram bot orqali yoki shaxsiy ID bilan kiring.");
+      // Desktop testing fallback: do not block with fatal error, allow manual ID entry
       setLoading(false);
       return;
     }
 
-    loadPortalData();
+    loadPortalData(identifier);
   }, [identifier]);
 
-  const loadPortalData = async () => {
-    if (!identifier) return;
+  const loadPortalData = async (targetId?: string) => {
+    const idToFetch = targetId || identifier || manualId;
+    if (!idToFetch) {
+      setError("Iltimos, o'quvchi yoki Telegram ID raqamini kiriting.");
+      return;
+    }
     try {
       setLoading(true);
       setError(null);
-      const res = await crmApi.getStudentPortal(identifier);
+      const res = await crmApi.getStudentPortal(idToFetch);
       setData(res);
     } catch (err: any) {
-      setError(err.message || "Ma'lumotlarni yuklashda xatolik yuz berdi");
+      setError(err.message || "Talaba kabinetini yuklashda xatolik yuz berdi");
     } finally {
       setLoading(false);
     }
   };
 
+  const handleManualSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualId.trim()) return;
+    loadPortalData(manualId.trim());
+  };
+
   const getAttendanceBadge = (status: string) => {
     switch (status) {
       case 'PRESENT':
-        return <span className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium px-2 py-0.5 rounded text-xs">Bor</span>;
+        return <span className="bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 font-medium px-2 py-0.5 rounded text-xs">Bor</span>;
       case 'LATE':
-        return <span className="bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium px-2 py-0.5 rounded text-xs">Kechikkan</span>;
+        return <span className="bg-amber-500/10 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400 font-medium px-2 py-0.5 rounded text-xs">Kechikkan</span>;
       case 'EXCUSED':
-        return <span className="bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium px-2 py-0.5 rounded text-xs">Sababli</span>;
+        return <span className="bg-blue-500/10 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 font-medium px-2 py-0.5 rounded text-xs">Sababli</span>;
       case 'ABSENT':
-        return <span className="bg-rose-500/10 text-rose-600 dark:text-rose-400 font-medium px-2 py-0.5 rounded text-xs">Yo'q</span>;
+        return <span className="bg-rose-500/10 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 font-medium px-2 py-0.5 rounded text-xs">Yo'q</span>;
       default:
-        return <span className="bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded text-xs">{status}</span>;
+        return <span className="bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 px-2 py-0.5 rounded text-xs">{status}</span>;
     }
   };
 
   const getGradeTypeBadge = (type: string) => {
     switch (type) {
       case 'HOMEWORK':
-        return <span className="text-xs bg-indigo-50 text-indigo-600 font-medium px-2 py-0.5 rounded">Uyga vazifa</span>;
+        return <span className="text-xs bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-300 font-medium px-2 py-0.5 rounded">Uyga vazifa</span>;
       case 'CLASSWORK':
-        return <span className="text-xs bg-cyan-50 text-cyan-600 font-medium px-2 py-0.5 rounded">Darsdagi faollik</span>;
+        return <span className="text-xs bg-cyan-50 text-cyan-600 dark:bg-cyan-950/60 dark:text-cyan-300 font-medium px-2 py-0.5 rounded">Darsdagi faollik</span>;
       case 'EXAM':
-        return <span className="text-xs bg-purple-50 text-purple-600 font-medium px-2 py-0.5 rounded">Imtihon</span>;
+        return <span className="text-xs bg-purple-50 text-purple-600 dark:bg-purple-950/60 dark:text-purple-300 font-medium px-2 py-0.5 rounded">Imtihon</span>;
       case 'QUIZ':
-        return <span className="text-xs bg-amber-50 text-amber-600 font-medium px-2 py-0.5 rounded">Oraliq test</span>;
+        return <span className="text-xs bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-300 font-medium px-2 py-0.5 rounded">Oraliq test</span>;
       default:
-        return <span className="text-xs bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded">{type}</span>;
+        return <span className="text-xs bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 px-2 py-0.5 rounded">{type}</span>;
     }
   };
 
@@ -160,30 +170,68 @@ function StudentPortalContent() {
     );
   }
 
-  if (error || !data) {
+  if (!data) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-16 h-16 bg-rose-100 dark:bg-rose-950/50 rounded-2xl flex items-center justify-center text-3xl mb-4 text-rose-600">
-          ⚠️
+        <div className="w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl p-6 text-left">
+          <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-950/50 rounded-xl flex items-center justify-center text-2xl mb-4 text-indigo-600 dark:text-indigo-400">
+            🎓
+          </div>
+          <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+            Talaba Shaxsiy Kabineti
+          </h2>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Telegram ID yoki o'quvchi ro'yxat raqami orqali kabinetingizga kiring.
+          </p>
+
+          {error && (
+            <div className="mt-4 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl text-rose-700 dark:text-rose-300 text-xs font-medium">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleManualSearch} className="mt-4 space-y-3">
+            <div>
+              <label htmlFor="student-id-input" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Talaba ID yoki Telegram ID
+              </label>
+              <input
+                id="student-id-input"
+                type="text"
+                value={manualId}
+                onChange={(e) => setManualId(e.target.value)}
+                placeholder="Masalan: lead_... yoki 12345678"
+                className="w-full px-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-2.5 bg-indigo-600 text-white font-medium text-xs rounded-xl shadow-sm hover:bg-indigo-700 active:scale-[0.98] transition"
+            >
+              Kabinetga kirish
+            </button>
+          </form>
+
+          <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+            <a
+              href="/"
+              className="text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
+            >
+              ← Bosh sahifaga qaytish
+            </a>
+            {typeof window !== 'undefined' && (window as any).Telegram?.WebApp && (
+              <button
+                type="button"
+                onClick={() => (window as any).Telegram.WebApp.close()}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                Telegramni yopish
+              </button>
+            )}
+          </div>
         </div>
-        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-          Kabinet topilmadi
-        </h2>
-        <p className="mt-2 text-sm text-slate-600 dark:text-slate-400 max-w-sm">
-          {error || "Sizning hisobingiz bo'yicha faol o'quv kursi topilmadi."}
-        </p>
-        <button
-          onClick={() => {
-            if (typeof window !== 'undefined' && (window as any).Telegram?.WebApp) {
-              (window as any).Telegram.WebApp.close();
-            } else {
-              window.location.reload();
-            }
-          }}
-          className="mt-6 px-6 py-2.5 bg-indigo-600 text-white font-medium text-sm rounded-xl shadow-sm hover:bg-indigo-700 transition"
-        >
-          Yopish yoki Qaytadan urinish
-        </button>
       </div>
     );
   }
@@ -206,9 +254,21 @@ function StudentPortalContent() {
               </p>
             </div>
           </div>
-          <span className="bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 px-2.5 py-1 rounded-full text-xs font-semibold">
-            Faol Talaba
-          </span>
+          <div className="flex items-center space-x-2">
+            <span className="bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 px-2.5 py-1 rounded-full text-xs font-semibold">
+              Faol Talaba
+            </span>
+            <button
+              onClick={() => {
+                setData(null);
+                setManualId('');
+              }}
+              title="Boshqa talaba kabinetiga o'tish"
+              className="text-xs bg-white/10 hover:bg-white/20 text-white px-2 py-1 rounded-lg border border-white/20 transition"
+            >
+              Chiqish
+            </button>
+          </div>
         </div>
 
         {/* Group Selector if multiple */}
@@ -246,7 +306,14 @@ function StudentPortalContent() {
                   ({currentEnrollment.stats.presentCount}/{currentEnrollment.stats.totalLessons})
                 </span>
               </div>
-              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+              <div
+                role="progressbar"
+                aria-valuenow={currentEnrollment.stats.attendancePercentage}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Davomat ko'rsatkichi foizi"
+                className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden"
+              >
                 <div
                   className="bg-indigo-600 h-full rounded-full transition-all"
                   style={{ width: `${Math.min(currentEnrollment.stats.attendancePercentage, 100)}%` }}
@@ -270,8 +337,12 @@ function StudentPortalContent() {
         )}
 
         {/* Tab Navigation */}
-        <div className="flex bg-slate-200/70 dark:bg-slate-800/70 p-1 rounded-xl">
+        <div role="tablist" aria-label="Talaba kabineti bo'limlari" className="flex bg-slate-200/70 dark:bg-slate-800/70 p-1 rounded-xl">
           <button
+            role="tab"
+            id="tab-info"
+            aria-selected={activeTab === 'info'}
+            aria-controls="panel-info"
             onClick={() => setActiveTab('info')}
             className={`flex-1 py-2 text-xs font-semibold rounded-lg transition ${
               activeTab === 'info'
@@ -282,6 +353,10 @@ function StudentPortalContent() {
             📋 Kurs & Jadval
           </button>
           <button
+            role="tab"
+            id="tab-attendance"
+            aria-selected={activeTab === 'attendance'}
+            aria-controls="panel-attendance"
             onClick={() => setActiveTab('attendance')}
             className={`flex-1 py-2 text-xs font-semibold rounded-lg transition ${
               activeTab === 'attendance'
@@ -292,6 +367,10 @@ function StudentPortalContent() {
             📅 Davomat ({currentEnrollment?.attendances?.length || 0})
           </button>
           <button
+            role="tab"
+            id="tab-grades"
+            aria-selected={activeTab === 'grades'}
+            aria-controls="panel-grades"
             onClick={() => setActiveTab('grades')}
             className={`flex-1 py-2 text-xs font-semibold rounded-lg transition ${
               activeTab === 'grades'
@@ -305,7 +384,7 @@ function StudentPortalContent() {
 
         {/* TAB 1: Course Info */}
         {activeTab === 'info' && currentEnrollment && (
-          <div className="space-y-3">
+          <div id="panel-info" role="tabpanel" aria-labelledby="tab-info" className="space-y-3">
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-800 space-y-3">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
                 <div>
@@ -395,7 +474,7 @@ function StudentPortalContent() {
 
         {/* TAB 2: Attendance */}
         {activeTab === 'attendance' && currentEnrollment && (
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-800">
+          <div id="panel-attendance" role="tabpanel" aria-labelledby="tab-attendance" className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-800">
             <h4 className="font-bold text-sm mb-3 text-slate-900 dark:text-slate-100 flex items-center justify-between">
               <span>📅 Darslardagi davomat</span>
               <span className="text-xs font-medium text-indigo-600">
@@ -436,7 +515,7 @@ function StudentPortalContent() {
 
         {/* TAB 3: Grades */}
         {activeTab === 'grades' && currentEnrollment && (
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-800">
+          <div id="panel-grades" role="tabpanel" aria-labelledby="tab-grades" className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-800">
             <h4 className="font-bold text-sm mb-3 text-slate-900 dark:text-slate-100 flex items-center justify-between">
               <span>⭐ Qo'yilgan baholar</span>
               <span className="text-xs font-medium text-amber-600">
