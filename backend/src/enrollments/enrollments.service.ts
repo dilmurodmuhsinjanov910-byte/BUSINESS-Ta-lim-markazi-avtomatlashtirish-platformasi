@@ -169,7 +169,7 @@ export class EnrollmentsService {
       const configuredBase = this.configService.get<string>('WEBAPP_BASE_URL');
       const baseUrl = (configuredBase && configuredBase.startsWith('https://'))
         ? configuredBase.replace(/\/+$/, '')
-        : 'https://silly-jobs-stick.loca.lt';
+        : 'https://al-xorazmiy-edu.loca.lt';
       const webAppUrl = `${baseUrl}/student?telegramId=${lead.telegramId}&enrollmentId=${enrollment.id}`;
       const schedule = `${group.daysOfWeek} (${group.startTime} - ${group.endTime}), Xona: ${group.roomNumber || 'Asosiy'}`;
 
