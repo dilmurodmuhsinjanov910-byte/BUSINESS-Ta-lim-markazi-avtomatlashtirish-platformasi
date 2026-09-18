@@ -90,7 +90,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (configured && configured.startsWith('https://')) {
       return configured.replace(/\/+$/, '');
     }
-    return 'https://bd904c086ab09708-194-93-24-12.serveousercontent.com';
+    return 'https://silly-jobs-stick.loca.lt';
   }
 
   private setupHandlers() {
