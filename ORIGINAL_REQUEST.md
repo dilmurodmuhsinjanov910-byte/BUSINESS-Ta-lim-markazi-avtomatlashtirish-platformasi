@@ -43,3 +43,43 @@ Sinov jarayonida aniqlangan har qanday xavfsizlik zaifligi yoki interfeys xatosi
 - [ ] Backend test to'plami (`npm test`) 100% muvaffaqiyatli o'tadi (0 xatolik).
 - [ ] Frontend loyihasi (`npm run build`) muvaffaqiyatli build bo'ladi.
 - [ ] Barcha tuzatishlar va xulosalar bo'yicha to'liq hisobot taqdim etiladi.
+
+## Follow-up — 2026-09-18T07:08:51Z
+
+Execute comprehensive penetration testing, vulnerability identification, and security hardening for the "BUSINESS : Ta'lim markazi avtomatlashtirish platformasi" education platform (NestJS backend, Next.js frontend, Telegram Bot, and Telegram Mini App).
+
+Working directory: d:\talim moassalari 2
+Integrity mode: demo
+
+## Requirements
+
+### R1. Comprehensive Attack Surface Penetration Testing
+Perform adversarial security testing across all platform interfaces:
+1. **Authentication & Session Security**: Validate JWT handling, token tampering, missing expiration checks, secret strength, and brute-force resistance on `/api/auth/*`.
+2. **Authorization & Privilege Escalation (RBAC & IDOR)**: Test for broken access control across roles (`SUPER_ADMIN`, `ADMIN`, `TEACHER`, `OPERATOR`, `STUDENT`). Verify that unauthorized users cannot view, edit, or delete leads, enrollments, groups, teachers, debtor payments, or teacher chat messages.
+3. **Input Validation, Injection & Sanitization**: Probe all API inputs and URL parameters for injection risks (NoSQL/SQL injection, XSS in lead notes, invalid data types, unbounded payloads).
+4. **Rate Limiting & DoS Protection**: Verify that the global and route-level rate limiting guards effectively throttle high-frequency requests across sensitive endpoints (`/api/auth/login`, `/api/bookings`, `/api/leads`, `/api/ai/chat`, `/api/telegram/simulate*`).
+
+### R2. Telegram Bot and Mini App Boundary Security
+1. **Telegram WebApp Authentication & IDOR**: Verify that student and teacher portal endpoints (`/api/enrollments/student/:identifier`, `/api/enrollments/teacher`, `/api/teacher-messages/*`) reject unauthorized identifier spoofing or cross-tenant data access.
+2. **Bot Handler Guardrails**: Ensure Telegram command handlers strictly validate incoming `from.id` and reject unauthorized attempts to trigger teacher, admin, or payment flows.
+
+### R3. Vulnerability Remediation & Automated Regression Hardening
+For every vulnerability or security weakness discovered:
+1. Implement clean, robust fixes (patches) in the codebase following standard security practices.
+2. Add automated security test cases in `backend/src/security-pentest.spec.ts` (or relevant spec files) demonstrating that the attack vector is completely mitigated.
+3. Ensure no regressions are introduced and that existing platform features remain 100% functional.
+
+## Acceptance Criteria
+
+### Automated Security & Regression Verification
+- [ ] Security test suite in `backend` executes and passes all test suites (`npm test` passes 100%).
+- [ ] Dedicated penetration test cases cover JWT tampering, privilege escalation, parameter injection, rate limiting, and Telegram WebApp IDOR protection.
+- [ ] No unauthorized user can access or modify endpoints outside their assigned role permissions.
+- [ ] Rate limiting reliably blocks flood requests with HTTP 429 Too Many Requests.
+- [ ] `backend` builds cleanly with `npm run build` (0 TypeScript / NestJS build errors).
+- [ ] `frontend` builds cleanly with `npm run build` (0 Next.js build errors).
+- [ ] A structured security audit & remediation summary report is produced documenting:
+  - Discovered vulnerabilities (Severity: Critical, High, Medium, Low)
+  - Proof of Concept (PoC) / Attack vectors tested
+  - Applied fixes and mitigation verification
