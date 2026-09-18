@@ -131,6 +131,45 @@ describe('Teachers Module (Service & Controller)', () => {
       );
     });
 
+    it('should assign a group and update schedule for teacher', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'tch-1',
+        fullName: 'Rustam Ustoz',
+        role: Role.TEACHER,
+      });
+      (mockPrisma as any).group.findUnique = jest.fn().mockResolvedValue({ id: 'grp-1', name: 'IELTS-301' });
+      (mockPrisma as any).group.update = jest.fn().mockResolvedValue({
+        id: 'grp-1',
+        name: 'IELTS-301',
+        teacherId: 'tch-1',
+        daysOfWeek: 'Dushanba - Chorshanba - Juma',
+        startTime: '16:00',
+        endTime: '17:30',
+        roomNumber: '105-xona',
+      });
+
+      const res = await service.assignGroup('tch-1', {
+        groupId: 'grp-1',
+        daysOfWeek: 'Dushanba - Chorshanba - Juma',
+        startTime: '16:00',
+        endTime: '17:30',
+        roomNumber: '105-xona',
+      });
+
+      expect(res.teacherId).toBe('tch-1');
+      expect(res.roomNumber).toBe('105-xona');
+      expect((mockPrisma as any).group.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'grp-1' },
+          data: expect.objectContaining({
+            teacherId: 'tch-1',
+            daysOfWeek: 'Dushanba - Chorshanba - Juma',
+            roomNumber: '105-xona',
+          }),
+        }),
+      );
+    });
+
     it('should unassign groups and delete teacher on remove', async () => {
       mockPrisma.user.findFirst.mockResolvedValue({
         id: 'tch-del',
@@ -154,3 +193,4 @@ describe('Teachers Module (Service & Controller)', () => {
     });
   });
 });
+

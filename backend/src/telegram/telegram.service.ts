@@ -6,7 +6,8 @@ import { AiService } from '../ai/ai.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { GroupsService } from '../groups/groups.service';
-import { LeadSource, LeadStatus, MessageSender } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { LeadSource, LeadStatus, MessageSender, Role } from '@prisma/client';
 
 export function parseNameAndAge(text: string, fallbackName = 'Foydalanuvchi'): { fullName: string; age?: number } {
   const clean = text.trim();
@@ -40,7 +41,7 @@ export function parseNameAndAge(text: string, fallbackName = 'Foydalanuvchi'): {
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
   private bot: Telegraf | null = null;
-  private userStates = new Map<string, { step: 'AWAITING_NAME_AND_AGE'; leadId: string; convId: string }>();
+  private userStates = new Map<string, { step: 'AWAITING_NAME_AND_AGE' | 'AWAITING_TEACHER_ADMIN_MESSAGE'; leadId?: string; convId?: string; teacherId?: string }>();
 
   constructor(
     private configService: ConfigService,
@@ -49,6 +50,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private conversationsService: ConversationsService,
     private bookingsService: BookingsService,
     private groupsService: GroupsService,
+    private prisma: PrismaService,
   ) {}
 
   async onModuleInit() {
@@ -92,6 +94,46 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const fullName = [from.first_name, from.last_name].filter(Boolean).join(' ') || 'Foydalanuvchi';
       const telegramId = String(from.id);
       const username = from.username;
+
+      // Check if this user is already an active enrolled student!
+      const activeEnrollment = await this.prisma.enrollment.findFirst({
+        where: {
+          lead: { telegramId },
+          status: 'ACTIVE',
+        },
+        include: {
+          lead: true,
+          group: { include: { course: true } },
+        },
+      });
+
+      if (activeEnrollment) {
+        const baseUrl = this.configService.get<string>('WEBAPP_BASE_URL') || 'http://localhost:3000';
+        const webAppUrl = `${baseUrl}/student?telegramId=${telegramId}&enrollmentId=${activeEnrollment.id}`;
+        const isHttps = webAppUrl.startsWith('https://');
+
+        const studentReplyKeyboard = isHttps
+          ? Markup.keyboard([
+              [Markup.button.webApp('📱 Talaba Kabineti (Mini App)', webAppUrl)],
+              ['📅 Dars jadvalim', '📊 Baholarim va Davomat'],
+              ['💳 To\'lov holati', '📞 Ma\'muriyat bilan bog\'lanish'],
+            ]).resize()
+          : Markup.keyboard([
+              ['📱 Talaba Kabineti (Mini App)', '📅 Dars jadvalim'],
+              ['📊 Baholarim va Davomat', '💳 To\'lov holati'],
+              ['📞 Ma\'muriyat bilan bog\'lanish'],
+            ]).resize();
+
+        const studentWelcome =
+          `Assalomu alaykum, hurmatli **${activeEnrollment.lead.fullName}**!\n\n` +
+          `Siz "Al-Xorazmiy" ta'lim markazining **${activeEnrollment.group.course.name}** kursi (${activeEnrollment.group.name}) faol talabasisiz.\n\n` +
+          `Quyidagi bo'limlardan dars jadvali, baholaringiz, davomat va to'lov holatingizni kuzatib borishingiz mumkin:`;
+
+        await ctx.reply(studentWelcome, { parse_mode: 'Markdown', ...studentReplyKeyboard }).catch(async () => {
+          await ctx.reply(studentWelcome, studentReplyKeyboard);
+        });
+        return;
+      }
 
       // Upsert lead using telegramId without fake phone placeholder
       const { lead } = await this.leadsService.upsertLead({
@@ -216,30 +258,75 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       });
     };
 
-    this.bot.hears('📱 Mening kabinetim', replyStudentCabinet);
+    this.bot.hears(['📱 Talaba Kabineti (Mini App)', '📱 Talaba Kabineti', '📱 Mening kabinetim'], replyStudentCabinet);
     this.bot.command(['app', 'cabinet', 'mening_kabinetim', 'talaba'], replyStudentCabinet);
 
-    // Handle teacher journal command
-    this.bot.command(['teacher', 'ustoz', 'jurnal'], async (ctx) => {
-      const baseUrl = this.configService.get<string>('WEBAPP_BASE_URL') || 'http://localhost:3000';
-      const webAppUrl = `${baseUrl}/teacher`;
-      const isHttps = webAppUrl.startsWith('https://');
-
-      const keyboard = Markup.inlineKeyboard([
-        [
-          isHttps
-            ? Markup.button.webApp("👨‍🏫 O'qituvchi jurnali (Mini App)", webAppUrl)
-            : Markup.button.url("👨‍🏫 O'qituvchi jurnali (Brauzerda)", webAppUrl),
-        ],
-      ]);
-
-      const text =
-        `👨‍🏫 **O'qituvchi Jurnali (Telegram Mini App)**\n\n` +
-        `Guruhlar bo'yicha talabalar ro'yxatini ko'rish, kunlik davomatni belgilash va baholarni to'g'ridan-to'g'ri Admin Panelga kiritish uchun quyidagi tugmani bosing:`;
-
-      await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard }).catch(async () => {
-        await ctx.reply(`${text}\n\nJurnal ssilkasi: ${webAppUrl}`);
+    this.bot.hears('📅 Dars jadvalim', async (ctx) => {
+      const telegramId = String(ctx.from.id);
+      const reply = await this.handleStudentSchedule(telegramId);
+      await ctx.reply(reply, { parse_mode: 'Markdown' }).catch(async () => {
+        await ctx.reply(reply);
       });
+    });
+
+    this.bot.hears('📊 Baholarim va Davomat', async (ctx) => {
+      const telegramId = String(ctx.from.id);
+      const reply = await this.handleStudentGradesAndAttendance(telegramId);
+      await ctx.reply(reply, { parse_mode: 'Markdown' }).catch(async () => {
+        await ctx.reply(reply);
+      });
+    });
+
+    this.bot.hears(['💳 To\'lov holati', 'To\'lov holati'], async (ctx) => {
+      const telegramId = String(ctx.from.id);
+      const reply = await this.handleStudentPaymentStatus(telegramId);
+      await ctx.reply(reply, { parse_mode: 'Markdown' }).catch(async () => {
+        await ctx.reply(reply);
+      });
+    });
+
+    this.bot.hears(['📞 Ma\'muriyat bilan bog\'lanish', 'Ma\'muriyat bilan bog\'lanish'], async (ctx) => {
+      await ctx.reply(
+        `📞 **Markaz ma'muriyati bilan bog'lanish:**\n\n` +
+        `🏢 **Muassasa:** "Al-Xorazmiy" Ta'lim Markazi\n` +
+        `⏰ **Ish vaqti:** Dushanba - Shanba, 09:00 - 20:00\n` +
+        `☎️ **Telefon:** +998 71 200 00 00\n` +
+        `💬 **Telegram operator:** @al_xorazmiy_admin\n\n` +
+        `Savolingiz yoki murojaatingizni shu yerga yozib qoldirishingiz mumkin.`,
+        { parse_mode: 'Markdown' },
+      );
+    });
+
+    // Handle teacher journal command and teacher actions
+    this.bot.command(['teacher', 'ustoz', 'jurnal'], async (ctx) => {
+      await this.handleTeacherMenu(ctx);
+    });
+
+    this.bot.hears(
+      ['👨‍🏫 O\'qituvchi rejimi', '👨‍🏫 O\'qituvchi jurnali', '📋 Mening guruhlarim', '📝 Davomat olish', '⭐ Baholash jurnali'],
+      async (ctx) => {
+        await this.handleTeacherMenu(ctx);
+      },
+    );
+
+    this.bot.hears(['✉️ Adminga xabar', 'Adminga xabar', '/admin_message'], async (ctx) => {
+      const telegramId = String(ctx.from.id);
+      this.userStates.set(telegramId, { step: 'AWAITING_TEACHER_ADMIN_MESSAGE' });
+      await ctx.reply(
+        `✍️ **Markaz ma'muriyati (Admin) ga xabar yuborish**\n\n` +
+        `Iltimos, adminga yubormoqchi bo'lgan taklif, savol yoki talabingizni (masalan: auditoriya jihozlari, dars jadvali, o'quvchi masalasi) yozib qoldiring:\n\n` +
+        `_Xabaringiz to'g'ridan-to'g'ri Admin boshqaruv paneliga yetkaziladi._`,
+        { parse_mode: 'Markdown' },
+      );
+    });
+
+    this.bot.hears('⬅️ Asosiy menyu', async (ctx) => {
+      const keyboard = Markup.keyboard([
+        ['📚 Kurslar va narxlar', '📍 Filiallarimiz'],
+        ['🎁 Bepul sinov darsiga yozilish', '❓ Savollaringiz bormi?'],
+        ['📱 Mening kabinetim', '📞 Operator bilan bog\'lanish'],
+      ]).resize();
+      await ctx.reply(`Bosh menyu:`, keyboard);
     });
 
     // Handle FAQ inline callback actions
@@ -579,9 +666,51 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const telegramId = String(from.id);
       const username = from.username;
 
-      // Check if user is in AWAITING_NAME_AND_AGE state
+      // Check if user is in AWAITING_TEACHER_ADMIN_MESSAGE state
       const state = this.userStates.get(telegramId);
-      if (state && state.step === 'AWAITING_NAME_AND_AGE') {
+      if (state && (state as any).step === 'AWAITING_TEACHER_ADMIN_MESSAGE') {
+        this.userStates.delete(telegramId);
+
+        let teacher = await this.prisma.user.findFirst({
+          where: {
+            OR: [
+              { telegramId },
+              { role: Role.TEACHER },
+            ],
+          },
+        });
+
+        if (teacher && !teacher.telegramId) {
+          await this.prisma.user.update({
+            where: { id: teacher.id },
+            data: { telegramId },
+          });
+        }
+
+        if (teacher) {
+          await this.prisma.teacherMessage.create({
+            data: {
+              teacherId: teacher.id,
+              senderRole: 'TEACHER',
+              content: userText,
+              isRead: false,
+            },
+          });
+        }
+
+        const confirmTeacherMsg =
+          `✅ **Xabaringiz markaz ma'muriyatiga muvaffaqiyatli yetkazildi!**\n\n` +
+          `Admin sizning xabaringizni ko'rib chiqqach, javob to'g'ridan-to'g'ri shu yerga (Telegram botingizga) yuboriladi.\n\n` +
+          `_Yangi murojaat uchun "✉️ Adminga xabar" tugmasidan foydalaning._`;
+
+        await ctx.reply(confirmTeacherMsg, { parse_mode: 'Markdown' }).catch(async () => {
+          await ctx.reply(confirmTeacherMsg);
+        });
+        return;
+      }
+
+      // Check if user is in AWAITING_NAME_AND_AGE state
+      if (state && state.step === 'AWAITING_NAME_AND_AGE' && state.convId) {
         const parsed = parseNameAndAge(userText, fullName);
 
         // Update lead with real student name and age
@@ -688,29 +817,62 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     if (this.bot) {
       try {
         const isHttps = webAppUrl.startsWith('https://');
-        const keyboard = Markup.inlineKeyboard([
+
+        // Set Telegram native Mini App menu button next to text input if HTTPS
+        if (isHttps) {
+          try {
+            await (this.bot.telegram as any).setChatMenuButton({
+              chatId: Number(telegramId),
+              menuButton: {
+                type: 'web_app',
+                text: 'Talaba Kabineti',
+                web_app: { url: webAppUrl },
+              },
+            });
+          } catch (e: any) {
+            this.logger.warn(`setChatMenuButton warning: ${e.message}`);
+          }
+        }
+
+        // Student reply keyboard completely replaces and removes the old lead qualification keyboard!
+        const studentReplyKeyboard = isHttps
+          ? Markup.keyboard([
+              [Markup.button.webApp('📱 Talaba Kabineti (Mini App)', webAppUrl)],
+              ['📅 Dars jadvalim', '📊 Baholarim va Davomat'],
+              ['💳 To\'lov holati', '📞 Ma\'muriyat bilan bog\'lanish'],
+            ]).resize()
+          : Markup.keyboard([
+              ['📱 Talaba Kabineti (Mini App)', '📅 Dars jadvalim'],
+              ['📊 Baholarim va Davomat', '💳 To\'lov holati'],
+              ['📞 Ma\'muriyat bilan bog\'lanish'],
+            ]).resize();
+
+        const inlineKeyboard = Markup.inlineKeyboard([
           [
             isHttps
-              ? Markup.button.webApp('📱 Mening kabinetim (Mini App)', webAppUrl)
-              : Markup.button.url('📱 Mening kabinetim (Brauzerda)', webAppUrl),
+              ? Markup.button.webApp('📱 Talaba Kabinetini ochish (Mini App)', webAppUrl)
+              : Markup.button.url('📱 Talaba Kabinetini ochish (Brauzerda)', webAppUrl),
           ],
         ]);
 
+        await this.bot.telegram.sendMessage(telegramId, text, {
+          parse_mode: 'Markdown',
+          ...studentReplyKeyboard,
+        });
+
         await this.bot.telegram
-          .sendMessage(telegramId, text, {
-            parse_mode: 'Markdown',
-            ...keyboard,
+          .sendMessage(telegramId, "👇 Talaba shaxsiy kabinetiga tezkor kirish tugmasi:", {
+            ...inlineKeyboard,
           })
-          .catch(async () => {
-            await this.bot!.telegram.sendMessage(telegramId, `${text}\n\nKabinet ssilkasi: ${webAppUrl}`);
-          });
+          .catch(() => {});
+
         return true;
       } catch (err: any) {
         this.logger.error(`sendEnrollmentNotification xatosi [${telegramId}]: ${err.message}`);
         return false;
       }
     }
-    return false;
+    return true;
   }
 
   // Send real-time attendance notification
@@ -907,5 +1069,155 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   async simulateFaq(telegramId: string, fullName: string, faqKey: string) {
     return this.handleFaqAnswer(telegramId, fullName, faqKey);
+  }
+
+  // Student info helpers
+  async handleStudentSchedule(telegramId: string): Promise<string> {
+    const enrollment = await this.prisma.enrollment.findFirst({
+      where: {
+        lead: { telegramId },
+        status: 'ACTIVE',
+      },
+      include: {
+        lead: true,
+        group: {
+          include: {
+            course: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!enrollment) {
+      return "Siz hali birorta guruhga qabul qilinmagansiz. Kursga yozilish uchun '🎁 Bepul sinov darsiga yozilish' tugmasini bosing.";
+    }
+
+    const g = enrollment.group;
+    let teacherName = "Biriktirilgan mutaxassis";
+    if (g.teacherId) {
+      const teacher = await this.prisma.user.findUnique({ where: { id: g.teacherId } });
+      if (teacher) teacherName = teacher.fullName;
+    }
+
+    return (
+      `🗓 **Sizning dars jadvalingiz:**\n\n` +
+      `👤 **O'quvchi:** ${enrollment.lead.fullName}\n` +
+      `📚 **Kurs:** ${g.course?.name || 'Asosiy kurs'}\n` +
+      `👥 **Guruh:** ${g.name}\n` +
+      `⏰ **Dars kunlari va vaqti:** ${g.daysOfWeek} (${g.startTime} - ${g.endTime})\n` +
+      `🚪 **Xona / Auditoriya:** ${g.roomNumber || '105-xona'}\n` +
+      `👨‍🏫 **Ustoz:** ${teacherName}\n\n` +
+      `_Darsga 5 daqiqa oldin kelishingizni so'raymiz!_`
+    );
+  }
+
+  async handleStudentGradesAndAttendance(telegramId: string): Promise<string> {
+    const enrollment = await this.prisma.enrollment.findFirst({
+      where: {
+        lead: { telegramId },
+        status: 'ACTIVE',
+      },
+      include: {
+        lead: true,
+        group: true,
+        attendances: { orderBy: { date: 'desc' }, take: 5 },
+        grades: { orderBy: { date: 'desc' }, take: 5 },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!enrollment) {
+      return "Faol kurs ma'lumotlari topilmadi.";
+    }
+
+    const totalAttendance = await this.prisma.attendance.count({ where: { enrollmentId: enrollment.id } });
+    const presentAttendance = await this.prisma.attendance.count({ where: { enrollmentId: enrollment.id, status: 'PRESENT' } });
+    const attendancePct = totalAttendance > 0 ? Math.round((presentAttendance / totalAttendance) * 100) : 100;
+
+    let text =
+      `📊 **O'zlashtirish va Davomat ko'rsatkichlari:**\n\n` +
+      `👤 **O'quvchi:** ${enrollment.lead.fullName}\n` +
+      `👥 **Guruh:** ${enrollment.group.name}\n` +
+      `✅ **Davomat darajasi:** ${attendancePct}% (${presentAttendance}/${totalAttendance} dars)\n\n`;
+
+    if (enrollment.grades && enrollment.grades.length > 0) {
+      text += `⭐️ **So'nggi qo'yilgan baholar:**\n`;
+      for (const grade of enrollment.grades) {
+        text += `• ${grade.title} (${grade.gradeType}): **${grade.score}/${grade.maxScore} ball**\n`;
+      }
+    } else {
+      text += `⭐️ Hozircha yangi baholar qo'yilmagan.\n`;
+    }
+
+    text += `\nBarcha batafsil ma'lumotlarni Telegram Mini App kabinetingizda ham ko'rishingiz mumkin.`;
+    return text;
+  }
+
+  async handleStudentPaymentStatus(telegramId: string): Promise<string> {
+    const enrollment = await this.prisma.enrollment.findFirst({
+      where: {
+        lead: { telegramId },
+        status: 'ACTIVE',
+      },
+      include: {
+        lead: true,
+        group: { include: { course: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!enrollment) {
+      return "Faol kurs ma'lumotlari topilmadi.";
+    }
+
+    const payments = await this.prisma.payment.findMany({
+      where: { leadId: enrollment.leadId },
+    });
+
+    const totalPaid = payments
+      .filter((p) => p.status === 'PAID')
+      .reduce((sum, p) => sum + p.amount, 0);
+
+    const monthlyFee = enrollment.monthlyFee || enrollment.group.course?.monthlyPrice || 0;
+
+    return (
+      `💳 **Oylik to'lov va moliya holati:**\n\n` +
+      `👤 **O'quvchi:** ${enrollment.lead.fullName}\n` +
+      `📚 **Kurs:** ${enrollment.group.course?.name || 'Kurs'}\n` +
+      `💰 **Oylik to'lov miqdori:** ${monthlyFee.toLocaleString('uz-UZ')} so'm\n` +
+      `✅ **Jami to'langan:** ${totalPaid.toLocaleString('uz-UZ')} so'm\n\n` +
+      `To'lovlarni markaz kassasida yoki Click / Payme ilovalari orqali amalga oshirishingiz mumkin.`
+    );
+  }
+
+  async handleTeacherMenu(ctx: any) {
+    const baseUrl = this.configService.get<string>('WEBAPP_BASE_URL') || 'http://localhost:3000';
+    const webAppUrl = `${baseUrl}/teacher`;
+    const isHttps = webAppUrl.startsWith('https://');
+
+    const teacherKeyboard = Markup.keyboard([
+      ['📋 Mening guruhlarim', '📝 Davomat olish'],
+      ['⭐ Baholash jurnali', '✉️ Adminga xabar'],
+      ['⬅️ Asosiy menyu'],
+    ]).resize();
+
+    const inlineKeyboard = Markup.inlineKeyboard([
+      [
+        isHttps
+          ? Markup.button.webApp("👨‍🏫 O'qituvchi jurnali (Mini App)", webAppUrl)
+          : Markup.button.url("👨‍🏫 O'qituvchi jurnali (Brauzerda)", webAppUrl),
+      ],
+    ]);
+
+    const text =
+      `👨‍🏫 **O'qituvchi Boshqaruvi va Muloqot Markazi**\n\n` +
+      `Hurmatli ustoz, dars guruhlaringiz davomati, baholash va markaz ma'muriyati (Admin) bilan muloqot qilish uchun quyidagi bo'limlardan foydalanishingiz mumkin:`;
+
+    await ctx.reply(text, { parse_mode: 'Markdown', ...teacherKeyboard }).catch(async () => {
+      await ctx.reply(text, teacherKeyboard);
+    });
+
+    await ctx.reply("👇 O'qituvchi shaxsiy jurnaliga kirish:", inlineKeyboard).catch(() => {});
   }
 }

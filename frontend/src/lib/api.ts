@@ -228,5 +228,15 @@ export const crmApi = {
     fetchApi<any>('/teachers', { method: 'POST', body: JSON.stringify(dto) }),
   deleteTeacher: (id: string) =>
     fetchApi<any>(`/teachers/${id}`, { method: 'DELETE' }),
+  assignTeacherGroup: (id: string, dto: { groupId: string; daysOfWeek?: string; startTime?: string; endTime?: string; roomNumber?: string }) =>
+    fetchApi<any>(`/teachers/${id}/assign-group`, { method: 'PUT', body: JSON.stringify(dto) }),
+
+  // Teacher-Admin Chat
+  getTeacherConversations: () =>
+    fetchApi<any[]>('/teacher-messages/conversations'),
+  getTeacherMessages: (teacherId: string) =>
+    fetchApi<any[]>(`/teacher-messages/${teacherId}`),
+  replyTeacherMessage: (teacherId: string, content: string) =>
+    fetchApi<any>(`/teacher-messages/${teacherId}/reply`, { method: 'POST', body: JSON.stringify({ content }) }),
 };
 

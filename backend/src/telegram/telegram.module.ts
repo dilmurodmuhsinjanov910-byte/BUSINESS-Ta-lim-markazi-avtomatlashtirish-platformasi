@@ -6,9 +6,10 @@ import { AiModule } from '../ai/ai.module';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { BookingsModule } from '../bookings/bookings.module';
 import { GroupsModule } from '../groups/groups.module';
+import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
-  imports: [LeadsModule, AiModule, ConversationsModule, BookingsModule, GroupsModule],
+  imports: [PrismaModule, LeadsModule, AiModule, ConversationsModule, BookingsModule, GroupsModule],
   controllers: [TelegramController],
   providers: [TelegramService],
   exports: [TelegramService],

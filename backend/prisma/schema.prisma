@@ -173,11 +173,13 @@ model User {
   fullName     String
   role         Role      @default(ADMIN)
   phone        String?
+  telegramId   String?   @unique
   isActive     Boolean   @default(true)
   branchId     String?
   branch       Branch?   @relation(fields: [branchId], references: [id])
   tasks        Task[]
   auditLogs    AuditLog[]
+  teacherMessages TeacherMessage[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 }
@@ -489,5 +491,18 @@ model StudentGrade {
   updatedAt    DateTime   @updatedAt
 
   @@index([enrollmentId])
+}
+
+model TeacherMessage {
+  id          String   @id @default(cuid())
+  teacherId   String
+  teacher     User     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  senderRole  String   @default("TEACHER") // "TEACHER" | "ADMIN"
+  content     String
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([teacherId])
+  @@index([isRead])
 }
 
