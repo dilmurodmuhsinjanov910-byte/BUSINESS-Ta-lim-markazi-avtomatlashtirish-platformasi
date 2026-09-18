@@ -42,7 +42,7 @@ import {
 
 export default function AdminPortal() {
   const [activeTab, setActiveTab] = useState<
-    "dashboard" | "leads" | "trials" | "conversations" | "courses" | "kb" | "tasks" | "teachers" | "attendance" | "audit" | "finance"
+    "dashboard" | "leads" | "trials" | "conversations" | "courses" | "kb" | "tasks" | "teachers" | "attendance" | "audit" | "finance" | "teacherChat"
   >("dashboard");
 
   const [isConnectedToBackend, setIsConnectedToBackend] = useState(false);
@@ -378,6 +378,23 @@ export default function AdminPortal() {
   const [teacherActionSuccess, setTeacherActionSuccess] = useState<string | null>(null);
   const [isDeletingTeacherId, setIsDeletingTeacherId] = useState<string | null>(null);
 
+  // Group & Schedule Assignment State
+  const [showAssignGroupModal, setShowAssignGroupModal] = useState(false);
+  const [selectedTeacherForGroup, setSelectedTeacherForGroup] = useState<any | null>(null);
+  const [assignGroupId, setAssignGroupId] = useState("");
+  const [assignDaysOfWeek, setAssignDaysOfWeek] = useState("Dushanba - Chorshanba - Juma");
+  const [assignStartTime, setAssignStartTime] = useState("16:00");
+  const [assignEndTime, setAssignEndTime] = useState("17:30");
+  const [assignRoomNumber, setAssignRoomNumber] = useState("105-xona");
+  const [isAssigningGroup, setIsAssigningGroup] = useState(false);
+
+  // Teacher-Admin Chat State
+  const [teacherConversations, setTeacherConversations] = useState<any[]>([]);
+  const [selectedTeacherChat, setSelectedTeacherChat] = useState<any | null>(null);
+  const [teacherMessages, setTeacherMessages] = useState<any[]>([]);
+  const [adminReplyText, setAdminReplyText] = useState("");
+  const [isSendingReply, setIsSendingReply] = useState(false);
+
   // Load real data from backend (Supports silent auto-polling)
   const refreshData = async (isManual = false) => {
     if (isManual) setIsRefreshing(true);
@@ -399,6 +416,7 @@ export default function AdminPortal() {
         paymentsData,
         debtorsData,
         teachersData,
+        teacherConvsData,
       ] = await Promise.allSettled([
         crmApi.getKpis(),
         crmApi.getFunnel(),
@@ -415,6 +433,7 @@ export default function AdminPortal() {
         crmApi.getPayments(),
         crmApi.getDebtors(),
         crmApi.getTeachers(),
+        crmApi.getTeacherConversations(),
       ]);
 
       let anySuccess = false;
@@ -571,6 +590,10 @@ export default function AdminPortal() {
         setTeachers(teachersData.value);
         anySuccess = true;
       }
+      if (teacherConvsData.status === "fulfilled" && Array.isArray(teacherConvsData.value)) {
+        setTeacherConversations(teacherConvsData.value);
+        anySuccess = true;
+      }
 
       setIsConnectedToBackend(anySuccess);
     } catch (err) {
@@ -646,11 +669,83 @@ export default function AdminPortal() {
     try {
       setIsDeletingTeacherId(teacherId);
       await crmApi.deleteTeacher(teacherId);
+      setTeacherActionSuccess(t.teacherRemoved);
       await refreshData();
     } catch (err: any) {
       alert(err.message || "O'qituvchini olib tashlashda xatolik yuz berdi");
     } finally {
       setIsDeletingTeacherId(null);
+    }
+  };
+
+  const handleOpenAssignGroup = (teacherItem: any) => {
+    setSelectedTeacherForGroup(teacherItem);
+    const firstAssigned = (teacherItem.assignedGroupDetails || [])[0];
+    if (firstAssigned) {
+      setAssignGroupId(firstAssigned.id);
+      setAssignDaysOfWeek(firstAssigned.daysOfWeek || "Dushanba - Chorshanba - Juma");
+      setAssignStartTime(firstAssigned.startTime || "16:00");
+      setAssignEndTime(firstAssigned.endTime || "17:30");
+      setAssignRoomNumber(firstAssigned.roomNumber || "105-xona");
+    } else if (groups.length > 0) {
+      setAssignGroupId(groups[0].id);
+      setAssignDaysOfWeek(groups[0].daysOfWeek || "Dushanba - Chorshanba - Juma");
+      setAssignStartTime(groups[0].startTime || "16:00");
+      setAssignEndTime(groups[0].endTime || "17:30");
+      setAssignRoomNumber(groups[0].roomNumber || "105-xona");
+    }
+    setShowAssignGroupModal(true);
+  };
+
+  const handleSaveAssignGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTeacherForGroup || !assignGroupId) return;
+    try {
+      setIsAssigningGroup(true);
+      await crmApi.assignTeacherGroup(selectedTeacherForGroup.id, {
+        groupId: assignGroupId,
+        daysOfWeek: assignDaysOfWeek,
+        startTime: assignStartTime,
+        endTime: assignEndTime,
+        roomNumber: assignRoomNumber,
+      });
+      setTeacherActionSuccess(t.groupAssigned);
+      setShowAssignGroupModal(false);
+      await refreshData();
+    } catch (err: any) {
+      alert("Guruh biriktirishda xatolik: " + (err.message || "Noma'lum"));
+    } finally {
+      setIsAssigningGroup(false);
+    }
+  };
+
+  const handleSelectTeacherChat = async (conv: any) => {
+    setSelectedTeacherChat(conv);
+    try {
+      const msgs = await crmApi.getTeacherMessages(conv.teacherId);
+      setTeacherMessages(msgs);
+      const updatedConvs = await crmApi.getTeacherConversations();
+      setTeacherConversations(updatedConvs);
+    } catch (e: any) {
+      console.error("Xabarlarni yuklashda xato:", e);
+    }
+  };
+
+  const handleSendAdminReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTeacherChat || !adminReplyText.trim()) return;
+    try {
+      setIsSendingReply(true);
+      const newMsg = await crmApi.replyTeacherMessage(selectedTeacherChat.teacherId, adminReplyText.trim());
+      setTeacherMessages((prev) => [...prev, newMsg]);
+      setAdminReplyText("");
+      setTeacherActionSuccess(t.replySent);
+      const updatedConvs = await crmApi.getTeacherConversations();
+      setTeacherConversations(updatedConvs);
+    } catch (e: any) {
+      alert("Javob yuborishda xatolik: " + (e.message || "Noma'lum"));
+    } finally {
+      setIsSendingReply(false);
     }
   };
 
@@ -1058,6 +1153,30 @@ export default function AdminPortal() {
                 </button>
 
                 <button
+                  onClick={() => {
+                    setActiveTab("teacherChat" as any);
+                    if (!selectedTeacherChat && teacherConversations.length > 0) {
+                      handleSelectTeacherChat(teacherConversations[0]);
+                    }
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                    activeTab === ("teacherChat" as any)
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <MessageSquare className="w-4 h-4" />
+                    <span>{t.teacherChatTab}</span>
+                  </div>
+                  {teacherConversations.reduce((acc: number, curr: any) => acc + (curr.unreadCount || 0), 0) > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500 text-white font-bold animate-pulse">
+                      {teacherConversations.reduce((acc: number, curr: any) => acc + (curr.unreadCount || 0), 0)}
+                    </span>
+                  )}
+                </button>
+
+                <button
                   onClick={() => setActiveTab("attendance")}
                   className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
                     activeTab === "attendance"
@@ -1115,15 +1234,7 @@ export default function AdminPortal() {
               <p className="text-[10px] text-slate-400 font-mono">SUPER_ADMIN</p>
             </div>
           </div>
-          <a
-            href="/teacher"
-            target="_blank"
-            rel="noreferrer"
-            className="mt-3 w-full flex items-center justify-center space-x-1.5 py-2 px-3 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-indigo-400 hover:text-indigo-300 text-xs font-semibold border border-slate-700/80 transition-colors"
-          >
-            <ExternalLink className="w-3.5 h-3.5" />
-            <span>{t.openTeacherPortal}</span>
-          </a>
+
         </div>
       </aside>
 
@@ -1149,6 +1260,8 @@ export default function AdminPortal() {
                 ? t.navCourses
                 : activeTab === "teachers"
                 ? t.navTeachers
+                : activeTab === ("teacherChat" as any)
+                ? t.teacherChatTab
                 : activeTab === "kb"
                 ? t.navKb
                 : activeTab === "tasks"
@@ -1925,16 +2038,6 @@ export default function AdminPortal() {
                 </div>
 
                 <div className="flex items-center space-x-3 shrink-0">
-                  <a
-                    href="/teacher"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-bold transition-all shadow-xs"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 text-indigo-500" />
-                    <span>{t.openTeacherPortal}</span>
-                  </a>
-
                   <button
                     onClick={() => setShowAddTeacherModal(true)}
                     className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-xs"
@@ -2035,17 +2138,25 @@ export default function AdminPortal() {
                               {tItem.email}
                             </td>
                             <td className="py-3.5 px-4">
-                              <div className="flex flex-wrap gap-1">
-                                {(tItem.assignedGroups || []).length === 0 ? (
-                                  <span className="text-slate-400 text-[11px]">Guruh biriktirilmagan</span>
+                              <div className="flex flex-col gap-1.5">
+                                {(tItem.assignedGroupDetails || []).length === 0 && (tItem.assignedGroups || []).length === 0 ? (
+                                  <span className="text-slate-400 text-[11px] italic">Guruh biriktirilmagan</span>
                                 ) : (
-                                  tItem.assignedGroups.map((grpName: string, gi: number) => (
-                                    <span
+                                  ((tItem.assignedGroupDetails && tItem.assignedGroupDetails.length > 0)
+                                    ? tItem.assignedGroupDetails
+                                    : (tItem.assignedGroups || []).map((name: string) => ({ name, daysOfWeek: '', startTime: '', endTime: '', roomNumber: '' }))
+                                  ).map((grp: any, gi: number) => (
+                                    <div
                                       key={gi}
-                                      className="px-2 py-0.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-mono text-[10px] rounded border border-indigo-200 dark:border-indigo-800 font-bold"
+                                      className="px-2.5 py-1 bg-indigo-50/80 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 rounded-lg border border-indigo-200 dark:border-indigo-800 text-[11px]"
                                     >
-                                      {grpName}
-                                    </span>
+                                      <div className="font-bold font-mono text-indigo-700 dark:text-indigo-300">{grp.name}</div>
+                                      {grp.daysOfWeek && (
+                                        <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                          🗓 {grp.daysOfWeek} {grp.startTime ? `(${grp.startTime} - ${grp.endTime})` : ''} {grp.roomNumber ? `• ${grp.roomNumber}` : ''}
+                                        </div>
+                                      )}
+                                    </div>
                                   ))
                                 )}
                               </div>
@@ -2062,13 +2173,22 @@ export default function AdminPortal() {
                               </span>
                             </td>
                             <td className="py-3.5 px-4 text-right">
-                              <button
-                                onClick={() => handleDeleteTeacher(tItem.id)}
-                                disabled={isDeletingTeacherId === tItem.id}
-                                className="px-2.5 py-1 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg text-xs font-semibold transition-colors border border-rose-200 dark:border-rose-900/50 disabled:opacity-50"
-                              >
-                                {isDeletingTeacherId === tItem.id ? "O'chirilmoqda..." : t.removeTeacher}
-                              </button>
+                              <div className="flex items-center justify-end space-x-2">
+                                <button
+                                  onClick={() => handleOpenAssignGroup(tItem)}
+                                  className="px-2.5 py-1 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg text-xs font-semibold transition-colors border border-indigo-200 dark:border-indigo-900/50 flex items-center space-x-1"
+                                >
+                                  <CalendarCheck className="w-3.5 h-3.5" />
+                                  <span>{t.assignGroup}</span>
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteTeacher(tItem.id)}
+                                  disabled={isDeletingTeacherId === tItem.id}
+                                  className="px-2.5 py-1 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg text-xs font-semibold transition-colors border border-rose-200 dark:border-rose-900/50 disabled:opacity-50"
+                                >
+                                  {isDeletingTeacherId === tItem.id ? "O'chirilmoqda..." : t.removeTeacher}
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))
@@ -2080,6 +2200,285 @@ export default function AdminPortal() {
             </div>
           )}
 
+          {/* TEACHER-ADMIN CHAT TAB */}
+          {activeTab === ("teacherChat" as any) && (
+            <div className="space-y-6">
+              <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center space-x-2 text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                    <MessageSquare className="w-4 h-4" />
+                    <span>{t.teacherChatTab}</span>
+                    <span className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 rounded-full font-mono text-[10px]">
+                      {teacherConversations.length} ta ustoz
+                    </span>
+                  </div>
+                  <h2 className="text-xl font-black text-slate-900 dark:text-white mt-1">
+                    {t.teacherChatTitle}
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {t.teacherChatSubtitle}
+                  </p>
+                </div>
+              </div>
+
+              {/* Chat Interface Layout */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 min-h-[550px]">
+                {/* Teachers List Column */}
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs flex flex-col">
+                  <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 px-2">
+                    Ustozlar Ro'yxati
+                  </h3>
+                  <div className="space-y-1.5 overflow-y-auto flex-1">
+                    {teacherConversations.length === 0 ? (
+                      <div className="text-center py-12 text-slate-400 text-xs">
+                        {t.noTeacherMessages}
+                      </div>
+                    ) : (
+                      teacherConversations.map((conv: any) => (
+                        <button
+                          key={conv.teacherId}
+                          onClick={() => handleSelectTeacherChat(conv)}
+                          className={`w-full text-left p-3 rounded-xl transition-all border ${
+                            selectedTeacherChat?.teacherId === conv.teacherId
+                              ? "bg-indigo-50/80 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-700"
+                              : "bg-slate-50/50 dark:bg-slate-800/30 border-transparent hover:bg-slate-100 dark:hover:bg-slate-800"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-xs text-slate-900 dark:text-white">
+                              {conv.teacherName}
+                            </span>
+                            {conv.unreadCount > 0 && (
+                              <span className="px-1.5 py-0.5 bg-rose-500 text-white rounded-full text-[10px] font-bold">
+                                {conv.unreadCount} {t.unread}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+                            {conv.teacherPhone || conv.teacherEmail}
+                          </p>
+                          {conv.lastMessage && (
+                            <p className="text-[11px] text-slate-600 dark:text-slate-300 truncate mt-1">
+                              <span className="font-semibold text-indigo-600 dark:text-indigo-400">
+                                {conv.lastMessage.senderRole === "TEACHER" ? "Ustoz: " : "Admin: "}
+                              </span>
+                              {conv.lastMessage.content}
+                            </p>
+                          )}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Active Chat Column */}
+                <div className="md:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs flex flex-col">
+                  {selectedTeacherChat ? (
+                    <>
+                      {/* Chat Header */}
+                      <div className="pb-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                        <div>
+                          <h3 className="font-black text-sm text-slate-900 dark:text-white">
+                            {selectedTeacherChat.teacherName}
+                          </h3>
+                          <div className="flex items-center space-x-2 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            <span>📞 {selectedTeacherChat.teacherPhone || "Telefon yo'q"}</span>
+                            <span>•</span>
+                            <span className="text-indigo-600 dark:text-indigo-400 font-semibold">
+                              📱 Telegram: {selectedTeacherChat.telegramId ? `Faol (${selectedTeacherChat.telegramId})` : "Ulanmagan"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Chat Message Stream */}
+                      <div className="flex-1 py-4 space-y-3 overflow-y-auto max-h-[380px]">
+                        {teacherMessages.length === 0 ? (
+                          <div className="text-center py-16 text-slate-400 text-xs">
+                            Ushbu o'qituvchi bilan yozishmalar mavjud emas. Birinchi xabarni yuboring.
+                          </div>
+                        ) : (
+                          teacherMessages.map((msg: any) => (
+                            <div
+                              key={msg.id}
+                              className={`flex flex-col ${
+                                msg.senderRole === "ADMIN" ? "items-end" : "items-start"
+                              }`}
+                            >
+                              <div
+                                className={`max-w-[80%] p-3.5 rounded-2xl text-xs leading-relaxed ${
+                                  msg.senderRole === "ADMIN"
+                                    ? "bg-indigo-600 text-white rounded-br-xs shadow-xs"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-bl-xs border border-slate-200 dark:border-slate-700"
+                                }`}
+                              >
+                                <div className="text-[10px] font-bold opacity-75 mb-1">
+                                  {msg.senderRole === "ADMIN" ? "Administrator" : selectedTeacherChat.teacherName}
+                                </div>
+                                <div className="whitespace-pre-wrap">{msg.content}</div>
+                              </div>
+                              <span className="text-[10px] text-slate-400 mt-1 px-1">
+                                {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Reply Box */}
+                      <form onSubmit={handleSendAdminReply} className="pt-3 border-t border-slate-200 dark:border-slate-800 flex gap-2">
+                        <input
+                          type="text"
+                          value={adminReplyText}
+                          onChange={(e) => setAdminReplyText(e.target.value)}
+                          placeholder={t.writeReply}
+                          className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <button
+                          type="submit"
+                          disabled={isSendingReply || !adminReplyText.trim()}
+                          className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center space-x-1.5 disabled:opacity-50"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>{isSendingReply ? "..." : t.sendReply}</span>
+                        </button>
+                      </form>
+                    </>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-slate-400 text-xs">
+                      Suhbatlashish uchun chap tomondan biror o'qituvchini tanlang.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ASSIGN GROUP & SCHEDULE MODAL */}
+          {showAssignGroupModal && selectedTeacherForGroup && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+                <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/50">
+                  <div>
+                    <h3 className="font-black text-base text-slate-900 dark:text-white">
+                      {t.assignGroupModalTitle}
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      Ustoz: <span className="font-bold text-indigo-600 dark:text-indigo-400">{selectedTeacherForGroup.fullName}</span>
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowAssignGroupModal(false)}
+                    className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-300 flex items-center justify-center text-xs font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveAssignGroup} className="p-6 space-y-4 text-xs">
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {t.selectGroup} *
+                    </label>
+                    <select
+                      value={assignGroupId}
+                      onChange={(e) => {
+                        const gid = e.target.value;
+                        setAssignGroupId(gid);
+                        const grp = groups.find((g: any) => g.id === gid);
+                        if (grp) {
+                          if (grp.daysOfWeek) setAssignDaysOfWeek(grp.daysOfWeek);
+                          if (grp.startTime) setAssignStartTime(grp.startTime);
+                          if (grp.endTime) setAssignEndTime(grp.endTime);
+                          if (grp.roomNumber) setAssignRoomNumber(grp.roomNumber);
+                        }
+                      }}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                    >
+                      {groups.map((grp: any) => (
+                        <option key={grp.id} value={grp.id}>
+                          {grp.name} — {grp.course?.name || "Kurs"} ({grp.daysOfWeek || "Vaqt belgilanmagan"})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {t.daysOfWeek} *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={assignDaysOfWeek}
+                      onChange={(e) => setAssignDaysOfWeek(e.target.value)}
+                      placeholder="Masalan: Dushanba - Chorshanba - Juma"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        {t.startTime} *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={assignStartTime}
+                        onChange={(e) => setAssignStartTime(e.target.value)}
+                        placeholder="16:00"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        {t.endTime} *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={assignEndTime}
+                        onChange={(e) => setAssignEndTime(e.target.value)}
+                        placeholder="17:30"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {t.roomNumber}
+                    </label>
+                    <input
+                      type="text"
+                      value={assignRoomNumber}
+                      onChange={(e) => setAssignRoomNumber(e.target.value)}
+                      placeholder="Masalan: 105-xona"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                    />
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end space-x-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowAssignGroupModal(false)}
+                      className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      Bekor qilish
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isAssigningGroup}
+                      className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition-all shadow-xs disabled:opacity-50"
+                    >
+                      {isAssigningGroup ? "Saqlanmoqda..." : t.saveAssignment}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
           {/* DAVOMAT & BAHOLAR (ATTENDANCE & GRADES) TAB */}
           {activeTab === "attendance" && (
             <div className="space-y-6">
@@ -2102,16 +2501,7 @@ export default function AdminPortal() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <a
-                      href="/teacher"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition flex items-center space-x-2"
-                    >
-                      <span>👨‍🏫</span>
-                      <span>O'qituvchi Jurnali (Mini App)</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
+
                     <a
                       href="/student"
                       target="_blank"
